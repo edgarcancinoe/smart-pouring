@@ -28,9 +28,9 @@ from lerobot.processor.env_processor import LiberoProcessorStep
 from dataset import episodes
 from dataset.sim_runs import playback
 
-NAME = "water_pour"  # dataset folder under dataset/data/lerobot/ (and repo name)
-ALL = False          # also export failed robot runs
-PUSH = None          # Hugging Face Hub repo to upload to, e.g. "you/water_pour"; None = local only
+NAME = "water_pour"  
+ALL = False          # to export failed robot runs
+PUSH = "edgarcancinoe/water_pour"
 SIZE = 256           # camera image size (px), as in SmolVLA-LIBERO
 CAMERAS = {"observation.images.image": "agentview", "observation.images.image2": "robot0_eye_in_hand"}
 FEATURES = {
