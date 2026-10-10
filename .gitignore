@@ -12,6 +12,5 @@ outputs/
 dataset/data/
 sim/recordings/
 
-
 sim/tools/
 sim/watering/start_pose.json
