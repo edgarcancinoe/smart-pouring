@@ -1,0 +1,28 @@
+#!/bin/sh
+# One entry point for the project.
+#  dataset (real videos -> numbers)
+#   ./run calibrate [video ...]        phone lens (default: dataset/data/calibration/*.MOV)
+#   ./run track  [A1-0 ...]            mug path from dataset/data/water-pour/<clip>/<clip>.MOV (default: all, parallel)
+#   ./run replay [A1-0 ...]            mug follows each tracked pour in the sim: table + videos
+#   ./run robot  [A1-0 ...]            the robot carries the mug along each pour: checks + videos
+#   ./run watch  [A1-0 ...]            viewer: play the saved robot runs one after another (6 pause, 7/9 prev/next)
+#   ./run video  [A1-0 ...]            robot.mp4 for each saved robot run (no re-simulation)
+#   ./run export [A1-0 ...]            successful robot runs -> LeRobot dataset for SmolVLA (dataset/data/lerobot/)
+#   ./run stats  [A1-0 ...]            success rates + one row per episode -> dataset/data/stats.md
+cd "$(dirname "$0")" || exit 1
+export PYTHONPATH=. PYTHONWARNINGS=ignore
+py=.venv/bin/python
+cmd="$1"; [ $# -gt 0 ] && shift
+
+case "$cmd" in
+  calibrate) exec $py dataset/calibration/calibrate.py "$@" ;;
+  track)     exec $py dataset/tracking/mug_tracker.py "$@" ;;
+  replay)    MUJOCO_GL=cgl exec $py dataset/sim_runs/replay_mug.py "$@" ;;
+  robot)     MUJOCO_GL=cgl exec $py dataset/retarget/robot_replay.py "$@" ;;
+  watch)     exec .venv/bin/mjpython dataset/sim_runs/playback.py --watch "$@" ;;
+  video)     MUJOCO_GL=cgl exec $py dataset/sim_runs/playback.py "$@" ;;
+  export)    MUJOCO_GL=cgl exec $py dataset/export_lerobot.py "$@" ;;
+  stats)     exec $py dataset/stats.py "$@" ;;
+  *)         [ -f sim/tools/run ] && . sim/tools/run  # local-only commands, if present (gitignored)
+             sed -n '2,11p' "$0" | sed 's/^# //' ;;
+esac
