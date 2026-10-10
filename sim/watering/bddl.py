@@ -1,20 +1,19 @@
 """Write one BDDL file per command ("water the left/middle/right plant").
 
-The layout is measured on the real setup (REAL_* below, cm). Real frame: +x to the
+The layout is measured on the real setup (dataset/setup.json, cm). Real frame: +x to the
 demonstrator's right, +y away from them. Sim table frame: origin at the table centre,
 +x away from the robot, +y the robot's left. The demonstrator stands where the robot is.
 Regions are (x_min, y_min, x_max, y_max); each start spot gets +-JITTER.
 """
 from pathlib import Path
 
-from .assets import MUG, POTS_DIMS, outer_radius
+from .assets import MUG, POTS_DIMS, SETUP, outer_radius
 
 BDDL_DIR = Path(__file__).parent / "bddl"
 JITTER = 0.005  # metres: how far the sim may shift each object from its measured spot
 
-# Measured on the real floor setup, cm.
-REAL_POTS = {"left": (-33.0, 46.1), "middle": (-7.5, 46.1), "right": (13.5, 46.1)}
-REAL_MUG_STARTS = [(-14.0, 20.0), (12.0, 20.0), (-3.5, 24.0), (18.2, 24.0)]
+REAL_POTS = {s: tuple(SETUP["pots"][s]) for s in ("left", "middle", "right")}  # cm
+REAL_MUG_STARTS = [tuple(xy) for xy in SETUP["mug_starts"]]
 
 # The middle pot lands at SIM_ANCHOR (table frame, m): 10 cm past the table centre, so every mug
 # spot is comfortably reachable.

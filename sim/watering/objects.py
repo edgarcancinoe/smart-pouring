@@ -29,7 +29,7 @@ class WateringMug(_GeneratedObject):
         super().__init__(name, obj_name)
 
 
-# One class per pot because each real pot has its own size (see POTS_DIMS in assets.py).
+# One class per pot because each real pot has its own size (dataset/setup.json).
 @register_object
 class PlantPotLeft(_GeneratedObject):
     def __init__(self, name="plant_pot_left", obj_name="plant_pot_left"):

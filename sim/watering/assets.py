@@ -1,20 +1,24 @@
 """Procedural MJCF for the mug and the plant pot.
 
 Both are open shells built from a ring of thin boxes plus a solid bottom, so they are hollow
-for the droplet spheres. The mug can taper (wider at the top). Dimensions live here.
+for the droplet spheres. The mug can taper (wider at the top). Real sizes come from dataset/setup.json.
 """
+import json
 from pathlib import Path
 
 import numpy as np
 
 ASSET_DIR = Path(__file__).parent / "assets"
+# The measured real setup (cm, floor frame), shared with the dataset pipeline.
+SETUP = json.loads((Path(__file__).resolve().parents[2] / "dataset" / "setup.json").read_text())
 
-# Metres. The real mug (9.5 cm tall, 6 -> 9 cm wide) scaled to fit the Panda gripper's ~8 cm opening.
+# Metres. The real mug scaled to fit the Panda gripper's ~8 cm opening.
 # r_in / r_in_top: inner radii at the bottom / top.
 MUG_SCALE = 0.8
 _WALL = 0.004
-MUG = dict(r_in=0.030 * MUG_SCALE - _WALL, r_in_top=0.045 * MUG_SCALE - _WALL, wall=_WALL,
-           height=0.095 * MUG_SCALE, bottom=0.006, n_sides=24,
+_mug = {k: v / 100 * MUG_SCALE for k, v in SETUP["mug"].items()}  # m
+MUG = dict(r_in=_mug["diameter_bottom"] / 2 - _WALL, r_in_top=_mug["diameter_top"] / 2 - _WALL, wall=_WALL,
+           height=_mug["height"], bottom=0.006, n_sides=24,
            rgba="0.95 0.72 0.18 1")
 _POT_STYLE = dict(wall=0.006, n_sides=24, rgba="0.72 0.38 0.24 1", soil_rgba="0.30 0.20 0.13 1",
                   leaf_rgba="0.25 0.55 0.22 1")
@@ -25,8 +29,8 @@ def _pot(diameter, height):
     return dict(_POT_STYLE, r_in=diameter / 2 - _POT_STYLE["wall"], height=height, soil=height - 0.03)
 
 
-# Real pots, outer diameter x height.
-POTS_DIMS = {"left": _pot(0.12, 0.10), "middle": _pot(0.09, 0.085), "right": _pot(0.13, 0.11)}
+POTS_DIMS = {s: _pot(SETUP["pots"]["diameter"][s] / 100, SETUP["pots"]["height"][s] / 100)
+             for s in ("left", "middle", "right")}
 DROPLET = dict(radius=0.005, count=30, rgba="0.30 0.60 0.95 1")  # 30 fit below the rim of the scaled mug
 
 COL = 'group="0" rgba="0 0 0 0" friction="1.0 0.005 0.0001"'

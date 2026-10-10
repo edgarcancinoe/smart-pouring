@@ -1,0 +1,63 @@
+{
+  "_units": "cm. Floor frame: +x to the demonstrator's right, +y away from them.",
+  "board": {
+    "square_mm_measured": 30.0,
+    "corner_A_xy": [
+      -58.0,
+      40.0
+    ],
+    "orientation": "readable from the demonstrator's spot: corner A far-left, board rows run along +x, columns toward -y"
+  },
+  "mug_tag": {
+    "id": 0,
+    "size_mm": 40.0,
+    "center_height_above_mug_bottom": 6.5
+  },
+  "mug": {
+    "height": 9.5,
+    "diameter_bottom": 6.0,
+    "diameter_top": 9.0
+  },
+  "pots": {
+    "diameter": {
+      "left": 12.0,
+      "middle": 9.0,
+      "right": 13.0
+    },
+    "height": {
+      "left": 10.0,
+      "middle": 8.5,
+      "right": 11.0
+    },
+    "left": [
+      -33.0,
+      46.1
+    ],
+    "middle": [
+      -7.5,
+      46.1
+    ],
+    "right": [
+      13.5,
+      46.1
+    ]
+  },
+  "mug_starts": [
+    [
+      -14.0,
+      20.0
+    ],
+    [
+      12.0,
+      20.0
+    ],
+    [
+      -3.5,
+      24.0
+    ],
+    [
+      18.2,
+      24.0
+    ]
+  ]
+}
