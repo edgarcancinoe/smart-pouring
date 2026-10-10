@@ -1,4 +1,6 @@
 .venv/
+.claude/
+
 __pycache__/
 outputs/
 *.egg-info/
@@ -10,4 +12,6 @@ outputs/
 dataset/data/
 sim/recordings/
 
-.claude/
+
+sim/tools/
+sim/watering/start_pose.json
