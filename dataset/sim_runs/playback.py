@@ -7,7 +7,8 @@ dataset/data/<group>/<clip>/robot_states.npz, one row per control step k:
   qpos[k]          the sim state AFTER that action; the state it was chosen in is qpos[k-1] (qpos_start for
                    k = 0), so training pairs are (render(qpos[k-1]), action[k]); images can be rendered later
                    at any size from these states
-  mocap_pos/quat   the ghosts (intended mug and hand), phase, hand error (cm, deg)
+  mocap_pos/quat   the ghosts (intended mug and hand)
+  phase[k]         "reach" / "grasp" / "follow" / "release"
 plus the plant side, playback speed and control rate.
 
 Usage: ./run video [A1-0 ...] [--jobs 8]   robot.mp4 per clip (default: every episode with saved states)
@@ -36,7 +37,7 @@ H = 480          # video panel size (robot camera | wrist camera)
 
 
 class Recorder:
-    """Collects the sim state once per control step; save() writes robot_states.npz.
+    """Collects the sim state, action and phase once per control step; save() writes robot_states.npz.
 
     problem -> the LIBERO problem (env.env) being recorded
     """
@@ -44,34 +45,31 @@ class Recorder:
     def __init__(self, problem):
         self.d = problem.sim.data._data
         self.qpos_start = self.d.qpos.astype(np.float32)
-        self.qpos, self.mocap_pos, self.mocap_quat, self.action = [], [], [], []
+        self.qpos, self.mocap_pos, self.mocap_quat, self.action, self.phase = [], [], [], [], []
 
-    def add(self, action):
+    def add(self, action, phase):
         """Store the state after one control step.
 
         action -> (7,) action that was sent
+        phase  -> "reach" / "grasp" / "follow" / "release"
         """
         self.action.append(np.asarray(action, np.float32))
+        self.phase.append(phase)
         self.qpos.append(self.d.qpos.astype(np.float32))
         self.mocap_pos.append(self.d.mocap_pos.astype(np.float32))
         self.mocap_quat.append(self.d.mocap_quat.astype(np.float32))
 
-    def save(self, clip, phase, track_err_cm, rot_err_deg, side, speed, control_hz):
-        """Write robot_states.npz. K = control steps recorded.
+    def save(self, clip, side, speed, control_hz):
+        """Write robot_states.npz.
 
-        clip         -> clip name
-        phase        -> K phase labels
-        track_err_cm -> K hand position errors, cm
-        rot_err_deg  -> K hand orientation errors, deg
-        side         -> plant name
-        speed        -> fraction of real speed the pour was played at
-        control_hz   -> control rate
+        clip       -> clip name
+        side       -> plant name
+        speed      -> fraction of real speed the pour was played at
+        control_hz -> control rate
         """
         np.savez_compressed(episodes.clip_dir(clip) / FILE, qpos=np.array(self.qpos), qpos_start=self.qpos_start,
                             action=np.array(self.action), mocap_pos=np.array(self.mocap_pos),
-                            mocap_quat=np.array(self.mocap_quat), phase=np.array(phase),
-                            track_err_cm=np.array(track_err_cm, np.float32), rot_err_deg=np.array(rot_err_deg, np.float32),
-                            side=side, speed=speed, control_hz=control_hz)
+                            mocap_quat=np.array(self.mocap_quat), phase=np.array(self.phase), side=side, speed=speed, control_hz=control_hz)
 
 
 def load(clip):
@@ -79,7 +77,7 @@ def load(clip):
 
     clip -> clip name, e.g. "A1-0"
     returns dict: qpos (K, nq), qpos_start (nq,), action (K, 7), mocap_pos (K, 2, 3), mocap_quat (K, 2, 4)
-            (ghosts: mug, hand), phase (K,), track_err_cm (K,), rot_err_deg (K,), side str, speed, control_hz
+            (ghosts: mug, hand), phase (K,), side str, speed, control_hz
     """
     path = episodes.clip_dir(clip) / FILE
     if not path.exists():
@@ -160,8 +158,6 @@ def render(clip):
                 for c in ("agentview", "robot0_eye_in_hand")]
         in_plant = e.watering_stats()[f"plant_pot_{s['side']}"]
         cv2.putText(imgs[0], f"{clip}  {s['phase'][k]}  {in_plant}/{DROPLET['count']} in plant", (10, 25), 0, 0.6, white, 2)
-        cv2.putText(imgs[0], f"hand off target: {s['track_err_cm'][k]:4.1f} cm {s['rot_err_deg'][k]:3.0f} deg",
-                    (10, 50), 0, 0.6, white, 2)
         cv2.putText(imgs[0], "green = intended mug, orange = intended hand", (10, H - 12), 0, 0.45, white, 1)
         cv2.putText(imgs[1], "wrist camera", (10, 25), 0, 0.6, white, 2)
         wr.write(np.hstack(imgs))
