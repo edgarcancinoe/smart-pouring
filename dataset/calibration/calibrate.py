@@ -15,7 +15,7 @@ import numpy as np
 from dataset import episodes
 
 OUT = Path(__file__).resolve().parent / "intrinsics.json"
-MARKERS = json.loads((Path(__file__).resolve().parent / "markers.json").read_text())  # written by ./run markers
+MARKERS = json.loads((Path(__file__).resolve().parent / "markers.json").read_text())  # printed board + mug code layout
 EVERY = 10        # use every Nth frame
 MIN_CORNERS = 10  # skip frames that see only a sliver of the board
 MIN_VIEWS = 15    # fewer usable frames than this: calibration is unreliable

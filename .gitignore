@@ -6,11 +6,8 @@ outputs/
 *.egg-info/
 .DS_Store
 
-# raw media and generated videos (large)
 *.MOV
 *.mov
 dataset/data/
-sim/recordings/
 
 sim/tools/
-sim/watering/start_pose.json
