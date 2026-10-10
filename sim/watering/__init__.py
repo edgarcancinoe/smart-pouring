@@ -11,6 +11,9 @@ if os.path.isdir(_CACHED_ASSETS):
 from . import objects, problem  # noqa: E402,F401
 from .bddl import POTS, write_bddl
 
+# Commands (env steps) per second; LIBERO's and SmolVLA-LIBERO's rate. Every env is built with it.
+CONTROL_HZ = 20
+
 
 def make_env(side="middle", offscreen=True, **kwargs):
     """LIBERO env for "water the <side> plant".
@@ -22,6 +25,7 @@ def make_env(side="middle", offscreen=True, **kwargs):
     from libero.libero.envs.env_wrapper import ControlEnv, OffScreenRenderEnv
 
     bddl = str(write_bddl()[side])
+    kwargs = {"control_freq": CONTROL_HZ, **kwargs}
     if not offscreen:
         kwargs = {"has_renderer": False, "has_offscreen_renderer": False, "use_camera_obs": False, **kwargs}
         return ControlEnv(bddl_file_name=bddl, **kwargs)

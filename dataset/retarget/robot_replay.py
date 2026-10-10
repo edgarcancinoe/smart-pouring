@@ -26,6 +26,7 @@ from dataset import episodes
 from dataset.retarget import mug_path as mp
 from dataset.sim_runs import playback
 from sim import watering
+from sim.watering import CONTROL_HZ
 from sim.watering.assets import DROPLET
 from sim.watering.robot import Arm, best_family, grab_point, grip_rotation, heading, radial_grip, ready_posture
 
@@ -35,7 +36,6 @@ MIN_ROOM = 5            # deg every joint must keep from its limits over the gra
 PLAN_STEP_S = 0.2       # s of clip time between the pour poses checked when choosing the tilt
 SPEED = 0.6             # play the demonstrator's path at this fraction of real speed
 LEAD_S = 0.10           # s to aim ahead along the path (the controller trails its target)
-CONTROL_HZ = 20
 APPROACH = 0.12         # m behind the mug where the hand descends before sliding in
 SAFE_HEIGHT = 0.20      # m above the mug for moves across the scene
 REACH_STEP = 0.012      # m per control step along the scripted lines
