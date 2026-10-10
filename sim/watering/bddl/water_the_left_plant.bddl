@@ -1,0 +1,65 @@
+(define (problem Watering_Tabletop_Manipulation)
+  (:domain robosuite)
+  (:language Water the left plant)
+    (:regions
+      (mug_region
+          (:target main_table)
+          (:ranges (
+              (-0.202 0.024 -0.120 0.106)
+              (-0.202 -0.236 -0.120 -0.154)
+              (-0.162 -0.081 -0.080 0.001)
+              (-0.162 -0.298 -0.080 -0.216)
+            )
+          )
+      )
+      (pot_left_region
+          (:target main_table)
+          (:ranges (
+              (0.035 0.190 0.165 0.320)
+            )
+          )
+      )
+      (pot_middle_region
+          (:target main_table)
+          (:ranges (
+              (0.050 -0.050 0.150 0.050)
+            )
+          )
+      )
+      (pot_right_region
+          (:target main_table)
+          (:ranges (
+              (0.030 -0.280 0.170 -0.140)
+            )
+          )
+      )
+    )
+
+  (:fixtures
+    main_table - table
+  )
+
+  (:objects
+    mug_1 - watering_mug
+    plant_pot_left - plant_pot_left
+    plant_pot_middle - plant_pot_middle
+    plant_pot_right - plant_pot_right
+  )
+
+  (:obj_of_interest
+    mug_1
+    plant_pot_left
+  )
+
+  (:init
+    (On mug_1 main_table_mug_region)
+    (On plant_pot_left main_table_pot_left_region)
+    (On plant_pot_middle main_table_pot_middle_region)
+    (On plant_pot_right main_table_pot_right_region)
+  )
+
+  (:goal
+    (And (Watered plant_pot_left))
+  )
+
+)
