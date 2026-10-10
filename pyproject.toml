@@ -1,0 +1,18 @@
+[project]
+name = "humanoid-challenge"
+version = "0.1.0"
+description = "Phone videos of my hands -> MuJoCo -> SmolVLA fine-tune"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "lerobot[smolvla,libero]==0.6.1",
+    # explicit list hf-libero for Mac
+    "hf-libero==0.1.4",
+    "mujoco>=3.0,<3.9",
+]
+
+[tool.uv]
+package = false
+override-dependencies = [
+    "egl-probe; sys_platform == 'never'",
+    "opencv-python; sys_platform == 'never'",
+]
