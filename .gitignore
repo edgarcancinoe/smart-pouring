@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+outputs/
+*.egg-info/
+.DS_Store
+
+# raw media and generated videos (large)
+*.MOV
+*.mov
+dataset/data/
+sim/recordings/
+
+.claude/
