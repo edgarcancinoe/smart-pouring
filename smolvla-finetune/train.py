@@ -37,7 +37,8 @@ def train(name, clips):
     print(f"\n=== {name}: {start} + {len(episodes)} demos -> {repo}")
 
     out = OUT / name
-    shutil.rmtree(out, ignore_errors=True)  # LeRobot refuses an existing output folder
+    if out.exists():
+        shutil.rmtree(out)  # LeRobot refuses an existing output folder
     cmd = [sys.executable, "-m", "lerobot.scripts.lerobot_train",
            f"--policy.path={start}",
            f"--policy.repo_id={repo}",
@@ -46,6 +47,7 @@ def train(name, clips):
            f"--policy.scheduler_decay_steps={STEPS}",  # decay over this run's length (default: 30k steps)
            f"--dataset.repo_id={runs.DATASET}",
            f"--dataset.episodes={episodes}",
+           "--dataset.video_backend=pyav",  # AV1 videos: PyAV bundles a decoder; torchcodec uses whatever FFmpeg is installed
            f"--rename_map={json.dumps(runs.CAMERA_NAMES[start])}",
            f"--batch_size={BATCH}",
            f"--steps={STEPS}",
