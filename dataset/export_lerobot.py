@@ -12,7 +12,8 @@ training sees exactly what the policy gets at evaluation:
 fps = the control rate (20 Hz): one frame per action.
 
 Only successful episodes (water in the plant, mug put back) unless ALL.
-Writes dataset/data/lerobot/<NAME>/ (replaced if it exists).
+Writes dataset/data/lerobot/<NAME>/ (replaced if it exists), plus meta/clips.json: the clip name of each
+episode, in episode order (training picks its demo subsets by clip). Local only: ./run upload publishes it.
 
 Usage: ./run export [A1-0 ...]   (default: every episode with a saved robot run)
 """
@@ -30,7 +31,6 @@ from dataset.sim_runs import playback
 
 NAME = "water_pour"  
 ALL = False          # to export failed robot runs
-PUSH = "edgarcancinoe/water_pour"
 SIZE = 256           # camera image size (px), as in SmolVLA-LIBERO
 CAMERAS = {"observation.images.image": "agentview", "observation.images.image2": "robot0_eye_in_hand"}
 FEATURES = {
@@ -73,7 +73,7 @@ def main():
     root = episodes.DATA / "lerobot" / NAME
     if root.exists():
         shutil.rmtree(root)
-    ds = LeRobotDataset.create(PUSH or f"local/{NAME}", fps=playback.load(keep[0])["control_hz"],
+    ds = LeRobotDataset.create(f"local/{NAME}", fps=playback.load(keep[0])["control_hz"],
                                features=FEATURES, root=root, robot_type="panda", use_videos=True)
     env = playback.scene()
     e = env.env
@@ -89,11 +89,9 @@ def main():
         frames += len(s["action"])
         print(f"[{n}/{len(keep)}] {clip}: {len(s['action'])} frames, \"{task}\"", flush=True)
     ds.finalize()
+    (root / "meta" / "clips.json").write_text(json.dumps(keep))
     env.close()
     print(f"\n{len(keep)} episodes, {frames} frames ({frames / ds.fps / 60:.1f} min at {ds.fps} fps) -> {root}")
-    if PUSH:
-        ds.push_to_hub()
-        print(f"uploaded: https://huggingface.co/datasets/{PUSH}")
 
 
 if __name__ == "__main__":

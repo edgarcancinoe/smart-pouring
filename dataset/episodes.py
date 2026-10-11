@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parent
 DATA = ROOT / "data"
 EPISODES = DATA / "water-pour"
 CALIBRATION_VIDEOS = DATA / "calibration"
+HUB_DATASET = "edgarcancinoe/water_pour"  # the LeRobot dataset on the Hugging Face Hub (./run upload)
 SETUP = json.loads((ROOT / "setup.json").read_text())  # measured layout and sizes, floor frame (cm)
 PLANTS = {"A": "left", "B": "middle", "C": "right"}
 _NAME = re.compile(r"^([ABC])([1-4])-([0-3])$", re.IGNORECASE)
