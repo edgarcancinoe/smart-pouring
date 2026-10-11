@@ -14,7 +14,7 @@ import runs
 
 MODELS  = ["libero-4", "libero-2", "libero-1", "base-4", "base-2", "base-1"]  # to train, in order (README.md)
 STEPS   = 10_000              # optimizer steps per model
-BATCH   = 32                  # samples per step
+BATCH   = 16                  # samples per step
 LOG_EVERY = 100             # steps between the loss lines in the log
 OUT = Path("outputs/train")
 
