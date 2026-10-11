@@ -25,6 +25,7 @@ from sim import watering
 from sim.watering import CONTROL_HZ
 from sim.watering.assets import DROPLET
 from sim.watering.bddl import POTS, real_to_sim
+from sim.watering.robot import START_Q
 
 PLANTS = ("left", "middle", "right")
 # Mug start spots in the real floor frame (cm, as dataset/setup.json): 1-4 trained, 5-8 new.
@@ -37,8 +38,6 @@ UNITS = [f"{plant}-{spot}" for plant in PLANTS for spot in SPOTS]  # every plant
 TRIALS = 7              # trials per plant x spot (24 x 7 = 168 per model)
 SEED = 0                # trial seeds derive from it (mug jitter, policy noise): the same for every model
 MUG_JITTER = 0.01       # m, uniform +- around the spot
-# Arm joints (rad) of the start posture 18 of the 47 training demos began from (hand 20 cm above the table).
-START_Q = np.array([-1.9605, 1.3877, 1.8972, -2.7726, -2.0429, 2.1932, 1.9253])
 N_ACTION_STEPS = 10     # actions run from each predicted chunk (50) before the policy looks again
 MAX_STEPS = 1200        # control steps (60 s; the longest demo is 958)
 LIFT_CM = 3.0           # the mug counts as lifted this far above where it stood

@@ -13,9 +13,10 @@ from huggingface_hub import HfApi, hf_hub_download
 import runs
 
 MODELS  = ["libero-4", "libero-2", "libero-1", "base-4", "base-2", "base-1"]  # to train, in order (README.md)
-STEPS   = 10_000              # optimizer steps per model
-BATCH   = 16                  # samples per step
+STEPS   = 25_000              # optimizer steps per model
+BATCH   = 32                  # samples per step
 LOG_EVERY = 100             # steps between the loss lines in the log
+SAVE_EVERY = 10_000          # steps between local checkpoints (outputs/train/<model>/checkpoints)
 OUT = Path("outputs/train")
 
 
@@ -48,7 +49,7 @@ def train(name, clips):
            f"--rename_map={json.dumps(runs.CAMERA_NAMES[start])}",
            f"--batch_size={BATCH}",
            f"--steps={STEPS}",
-           f"--save_freq={STEPS}",
+           f"--save_freq={SAVE_EVERY}",
            f"--log_freq={LOG_EVERY}",
            f"--output_dir={out}",
            "--wandb.enable=false"]

@@ -5,12 +5,18 @@ The trials are those of ./run eval (same scenes and seeds), so what you see is w
 Usage: ./run eval-watch
 """
 import mujoco
+import mujoco.cgl
 import mujoco.viewer
+from robosuite.utils import binding_utils
 
 import evaluate as ev
 
+# robosuite renders the policy's cameras through a GLFW window on macOS, which mjpython (script off the main thread) aborts on
+binding_utils.GLContext = lambda max_width, max_height, device_id=None: mujoco.cgl.GLContext(max_width, max_height)
+
 MODEL = "libero-4"                         # model to watch (<init>-<k>: README.md)
 UNITS = ["left-1", "middle-6", "right-8"]  # <plant>-<spot>, shown in this order
+UNITS = ["middle-4"]
 TRIALS = 1                                 # trials per unit (at most evaluate.TRIALS)
 
 
