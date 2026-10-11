@@ -2,7 +2,7 @@
 
 Writes results/<model>/<plant>-<spot>.json (one dict per trial) and videos/<plant>-<spot>.mp4.
 
-Usage: ./run eval [libero-0 libero-4 ...] [--jobs 2]   (default: MODELS)
+Usage: ./run eval [libero-0 libero-4 libero-4@10000 ...] [--jobs 2]   (default: MODELS; <model>@<step>: a local training checkpoint)
 (eval_watch.py: the same trials, live in the viewer)
 """
 import argparse
@@ -45,6 +45,7 @@ TOPPLED_DEG = 45.0      # ... as knocked over tilted this far
 RELEASE_CM = 8.0        # ... as released with the gripper point this far from it
 REST_S = 1.0            # end the trial once a lifted or knocked-over mug has rested, released, this long
 VIDEO_TRIALS = 1        # trials per unit filmed
+PROGRESS_EVERY = 200    # control steps between progress lines while a trial runs
 VIDEO_EVERY = 2         # film every Nth control step
 VIDEO_SIZE = 256        # px per camera panel
 RESULTS = Path(__file__).parent / "results"
@@ -64,7 +65,7 @@ def load_model(name):
     from lerobot.policies.smolvla.modeling_smolvla import SmolVLAPolicy
 
     if _cache.get("name") != name:
-        repo = runs.MODELS[name]["repo"]
+        repo = runs.repo(name)
         cfg = PreTrainedConfig.from_pretrained(repo)
         cfg.device = runs.device()
         policy = SmolVLAPolicy.from_pretrained(repo, config=cfg).eval()
@@ -159,6 +160,8 @@ def trial(env, model, plant, spot, seed, video=None, viewer=None):
         with lock():
             obs, *_ = env.step(queue.pop(0))
         steps += 1
+        if steps % PROGRESS_EVERY == 0:
+            print(f"    {_cache['name']} {plant}-{spot}: step {steps}/{MAX_STEPS}, {time.time() - t0:.0f} s", flush=True)
         if viewer:
             viewer.sync()
             if not viewer.is_running():
@@ -223,7 +226,7 @@ def run_unit(unit, name):
         trials.append(r)
         print(f"  {name} {unit} #{t}: {describe(r, plant)}", flush=True)
     (out / f"{unit}.json").write_text(json.dumps(dict(
-        model=name, repo=runs.MODELS[name]["repo"], plant=plant, spot=spot, spot_cm=SPOTS[spot],
+        model=name, repo=runs.repo(name), plant=plant, spot=spot, spot_cm=SPOTS[spot],
         trained_spot=spot in TRAINED_SPOTS, n_action_steps=N_ACTION_STEPS, max_steps=MAX_STEPS, trials=trials), indent=1))
     return dict(clip=unit, summary=f"{sum(r['success'] for r in trials)}/{TRIALS}")
 
@@ -235,12 +238,13 @@ def main():
     args = p.parse_args()
     wanted = args.models or MODELS
     from huggingface_hub import repo_exists
-    models = [m for m in wanted if repo_exists(runs.MODELS[m]["repo"])]  # fine-tuned ones appear as training finishes
+    # fine-tuned ones appear as training finishes; checkpoints (<model>@<step>) are local
+    models = [m for m in wanted if (Path(runs.repo(m)).exists() if "@" in m else repo_exists(runs.repo(m)))]
     if missing := [m for m in wanted if m not in models]:
-        print(f"not on the Hub yet (skipped): {', '.join(missing)}")
+        print(f"not on the Hub / on disk yet (skipped): {', '.join(missing)}")
     for name in models:
         todo = [u for u in UNITS if not (RESULTS / name / f"{u}.json").exists()]
-        print(f"\n=== {name} ({runs.MODELS[name]["repo"]}): {len(todo)} of {len(UNITS)} units to run, {TRIALS} trials each", flush=True)
+        print(f"\n=== {name} ({runs.repo(name)}): {len(todo)} of {len(UNITS)} units to run, {TRIALS} trials each", flush=True)
         for r in episodes.parallel_map(run_unit, todo, {"name": name}, args.jobs, name):
             if "error" in r:
                 print(f"{r['clip']}: FAILED: {r['error']}")

@@ -20,7 +20,7 @@ DROPLET_COLORS = {"in_target": "#2a6fdb", "in_wrong": "#d6453d", "spilled": "#9a
 def load():
     """{model: [trial dicts, each with plant, spot, trained_spot added]} for models with results."""
     out = {}
-    for name in runs.MODELS:
+    for name in [n for m in runs.MODELS for n in [m, *sorted(p.name for p in RESULTS.glob(f"{m}@*"))]]:
         files = sorted((RESULTS / name).glob("*.json"))
         rows = [dict(t, plant=u["plant"], spot=u["spot"], trained_spot=u["trained_spot"])
                 for f in files for u in [json.loads(f.read_text())] for t in u["trials"]]
@@ -43,7 +43,7 @@ def main():
     head = "| model | demos/pair | success, trained spots | success, new spots | success, all | watered | placed | lifted | droplets in plant | wrong plant |"
     lines = [head, "|" + "---|" * (head.count("|") - 1)]
     for name, rows in data.items():
-        k = runs.MODELS[name]["k"]
+        k = runs.MODELS[name.split("@")[0]]["k"]
         wrong = sum(r["in_wrong"] > r["in_target"] for r in rows)
         lines.append(f"| {name} | {k} | {rate([r for r in rows if r['trained_spot']])} "
                      f"| {rate([r for r in rows if not r['trained_spot']])} | {rate(rows)} | {rate(rows, 'watered')} "
@@ -61,6 +61,8 @@ def main():
         for start in COLORS:
             pts = []
             for name, rows in data.items():
+                if "@" in name:
+                    continue  # checkpoints: table only
                 model = runs.MODELS[name]
                 if model["start"] == start:
                     sub = [r for r in rows if r["trained_spot"] == trained]

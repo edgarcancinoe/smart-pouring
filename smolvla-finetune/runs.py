@@ -29,6 +29,13 @@ CAMERA_NAMES = {
 }
 
 
+def repo(name):
+    """Where a model loads from: its Hub repo, or for <model>@<step> (e.g. libero-4@10000) the local
+    checkpoint ./run train saved at that step."""
+    base, _, step = name.partition("@")
+    return f"outputs/train/{base}/checkpoints/{int(step):06d}/pretrained_model" if step else MODELS[base]["repo"]
+
+
 def device():
     import torch
     return "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
