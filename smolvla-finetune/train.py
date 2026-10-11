@@ -1,6 +1,6 @@
 """Fine-tune SmolVLA on the phone demos (runs.pick) and push each model to the Hub
 
-Usage: ./run train
+Usage: ./run train [libero-4 base-4 ...]   (default: MODELS)
 """
 import json
 import shutil
@@ -72,7 +72,7 @@ def train(name, clips):
 def main():
     clips = json.loads(Path(hf_hub_download(runs.DATASET, "meta/clips.json", repo_type="dataset")).read_text())
     OUT.mkdir(parents=True, exist_ok=True)
-    for name in MODELS:
+    for name in sys.argv[1:] or MODELS:
         train(name, clips)
 
 

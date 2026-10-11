@@ -12,7 +12,7 @@
 #   ./run upload                       the LeRobot dataset -> Hugging Face Hub
 
 #  policy (SmolVLA, smolvla-finetune/)
-#   ./run train                             fine-tune, push to the Hub (CUDA; smolvla-finetune/README.md)
+#   ./run train  [libero-4 ...]             fine-tune, push to the Hub (CUDA; smolvla-finetune/README.md)
 #   ./run eval   [libero-4 ...] [--jobs 2]  models in the sim: 3 plants x 8 spots x N trials -> results/
 #   ./run eval-watch                        one model, live in the MuJoCo viewer
 #   ./run compare                           every evaluated model: table + plots
