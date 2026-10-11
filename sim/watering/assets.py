@@ -4,6 +4,7 @@ Both are open shells built from a ring of thin boxes plus a solid bottom, so the
 for the droplet spheres. The mug can taper (wider at the top). Real sizes come from dataset/setup.json.
 """
 import json
+import os
 from pathlib import Path
 
 import numpy as np
@@ -150,5 +151,8 @@ def write_assets():
     for name, xml in models:
         d = ASSET_DIR / name
         d.mkdir(parents=True, exist_ok=True)
-        (d / f"{name}.xml").write_text(xml)
+        # write then rename: parallel workers (--jobs) must never read a half-written file
+        tmp = d / f"{name}.{os.getpid()}.tmp"
+        tmp.write_text(xml)
+        tmp.replace(d / f"{name}.xml")
     return ASSET_DIR

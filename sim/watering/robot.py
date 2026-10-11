@@ -16,11 +16,10 @@ LEVEL_GRIP = np.column_stack([[0, 0, 1], [0, -1, 0], [1, 0, 0]]).astype(float)
 GRIP_HEIGHT = 0.03   # m above the mug's bottom
 GRIP_BACK = 0.0175   # m toward the robot for tilted grips, so the palm clears the mug's wider rim
 LEVEL_DEG = 5        # a hand pointing down less than this counts as level
-READY_POS = np.array([-0.20, 0.0, 1.10])  # where the hand starts every episode: 20 cm above the table
+# Arm joints (rad) every episode starts from, demos and evaluation alike: hand 20 cm above the table.
+START_Q = np.array([-1.9605, 1.3877, 1.8972, -2.7726, -2.0429, 2.1932, 1.9253])
 GRAB_TOL_M, GRAB_TOL_DEG = 0.003, 1.0     # an IK answer counts as reaching the grab pose within this
 PATH_TOL_CM, PATH_TOL_DEG = 1.0, 3.0      # ... and as staying on the path within this, at every target
-READY_TOL_M, READY_TOL_DEG = 0.002, 0.5   # ... and as reaching the start pose within this
-MIN_MARGIN_DEG = 5.0                      # joint room the start pose must keep from every limit
 
 
 # --- grip geometry ---
@@ -163,26 +162,3 @@ def best_family(arm, grab_pos, grab_rot, targets, n_random=40, keep=4, seed=0):
         if room > best_room:
             best_q, best_room = q_grab, room
     return best_q, best_room
-
-
-def ready_posture(arm, rot, q_near, n_random=40, seed=0):
-    """The start pose: joint angles putting the hand exactly at READY_POS with orientation rot, at least
-    MIN_MARGIN_DEG from every joint limit, and as close as possible to q_near (the grab posture, so the
-    reach stays short and in the same posture family).
-
-    rot    -> (3, 3) hand orientation at the start
-    q_near -> (7,) rad, the grab posture
-    returns q (7,) rad; raises if no such posture exists
-    """
-    rng = np.random.default_rng(seed)
-    # seeds: the grab posture walked to READY_POS in a straight line, the grab posture itself, random ones
-    p_near, _ = arm.fk(q_near)
-    walk = follow_path(arm, [(p_near + s * (READY_POS - p_near), rot) for s in np.linspace(0, 1, 30)], q_near)[0][-1]
-    good = []
-    for q_seed in [walk, q_near] + random_postures(arm, n_random, rng):
-        q, err_m, err_deg = arm.ik(READY_POS, rot, q_seed, iters=400)
-        if err_m < READY_TOL_M and err_deg < READY_TOL_DEG and arm.margin_deg(q).min() > MIN_MARGIN_DEG:
-            good.append(q)
-    if not good:
-        raise RuntimeError("no start pose found within joint limits")
-    return min(good, key=lambda q: np.abs(q - q_near).max())

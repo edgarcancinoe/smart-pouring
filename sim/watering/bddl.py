@@ -5,6 +5,7 @@ demonstrator's right, +y away from them. Sim table frame: origin at the table ce
 +x away from the robot, +y the robot's left. The demonstrator stands where the robot is.
 Regions are (x_min, y_min, x_max, y_max); each start spot gets +-JITTER.
 """
+import os
 from pathlib import Path
 
 from .assets import MUG, POTS_DIMS, SETUP, outer_radius
@@ -95,6 +96,8 @@ def write_bddl():
             pot_init="\n".join(f"    (On plant_pot_{s} main_table_pot_{s}_region)" for s in POTS),
         )
         paths[side] = BDDL_DIR / f"water_the_{side}_plant.bddl"
-        paths[side].write_text(text)
+        tmp = paths[side].with_suffix(f".{os.getpid()}.tmp")  # write then rename, as in assets.py
+        tmp.write_text(text)
+        tmp.replace(paths[side])
     return paths
 
