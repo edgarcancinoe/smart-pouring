@@ -28,7 +28,7 @@ from dataset.sim_runs import playback
 from sim import watering
 from sim.watering import CONTROL_HZ
 from sim.watering.assets import DROPLET
-from sim.watering.robot import Arm, best_family, grab_point, grip_rotation, heading, radial_grip, ready_posture
+from sim.watering.robot import Arm, best_family, grab_point, heading, radial_grip, START_Q
 
 VIDEO = True            # also render robot.mp4 (./run video can render it later from the saved states)
 TILTS = (35, 40, 50)    # deg the hand may point down at the grab, flattest first
@@ -132,12 +132,10 @@ def run(clip):
     # We test samples along the planned path assuming different hand tilts. We start by lower inclination (flattest hand tilt)
     # and choose the first one that grabs the mug and performs whole pour.
     
-    # q_family is the arm posture at the grab
-
-    tilt, q_family = choose_tilt(arm, prep, e, base_xy)
+    tilt, _ = choose_tilt(arm, prep, e, base_xy)
     
-    # start pose: hand at READY_POS, in the same arm-posture family as the grab
-    q_ready = ready_posture(arm, grip_rotation(tilt, 0), q_family)
+    # start pose: the same for every demo, as at evaluation
+    q_ready = START_Q
     R_start = arm.fk(q_ready)[1]  # hand orientation at the start
 
     # restart the episode from it (reset puts the robot at init_qpos, so set that first), and make it the
