@@ -13,7 +13,7 @@ import numpy as np
 import runs
 
 RESULTS = Path(__file__).parent / "results"
-COLORS = {"libero": "#2a6fdb", "base": "#e07b20"}  # one hue per init (blue / orange: colorblind-safe pair)
+COLORS = {runs.LIBERO: "#2a6fdb", runs.BASE: "#e07b20"}  # one hue per start checkpoint (blue / orange: colorblind-safe)
 DROPLET_COLORS = {"in_target": "#2a6fdb", "in_wrong": "#d6453d", "spilled": "#9aa0a6", "in_mug": "#e0b84a"}
 
 
@@ -43,7 +43,7 @@ def main():
     head = "| model | demos/pair | success, trained spots | success, new spots | success, all | watered | placed | lifted | droplets in plant | wrong plant |"
     lines = [head, "|" + "---|" * (head.count("|") - 1)]
     for name, rows in data.items():
-        init, k = runs.parse(name)
+        k = runs.MODELS[name]["k"]
         wrong = sum(r["in_wrong"] > r["in_target"] for r in rows)
         lines.append(f"| {name} | {k} | {rate([r for r in rows if r['trained_spot']])} "
                      f"| {rate([r for r in rows if not r['trained_spot']])} | {rate(rows)} | {rate(rows, 'watered')} "
@@ -58,19 +58,19 @@ def main():
     # --- success vs k
     fig, axes = plt.subplots(1, 2, figsize=(9, 3.6), sharey=True)
     for ax, (title, trained) in zip(axes, [("Trained start spots (1-4)", True), ("New start spots (5-8)", False)]):
-        for init in runs.INITS:
+        for start in COLORS:
             pts = []
             for name, rows in data.items():
-                i, k = runs.parse(name)
-                if i == init:
+                model = runs.MODELS[name]
+                if model["start"] == start:
                     sub = [r for r in rows if r["trained_spot"] == trained]
-                    pts.append((k, np.mean([r["success"] for r in sub])))
+                    pts.append((model["k"], np.mean([r["success"] for r in sub])))
             if not pts:
                 continue
             ks, p = zip(*sorted(pts))
-            ax.plot(ks, p, "-o", color=COLORS[init], lw=2, ms=6, label=f"from smolvla_{init}")
+            ax.plot(ks, p, "-o", color=COLORS[start], lw=2, ms=6, label=f"from {start}")
         ax.set_title(title, fontsize=10)
-        ax.set_xticks([0, *runs.DEMOS])
+        ax.set_xticks(sorted({m["k"] for m in runs.MODELS.values()}))
         ax.set_xlabel("phone demos per plant x spot")
         ax.set_ylim(0, 1)
         ax.grid(axis="y", color="#e5e5e5")

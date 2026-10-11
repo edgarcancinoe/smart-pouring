@@ -65,7 +65,7 @@ def load_model(name):
     from lerobot.policies.smolvla.modeling_smolvla import SmolVLAPolicy
 
     if _cache.get("name") != name:
-        repo = runs.repo(name)
+        repo = runs.MODELS[name]["repo"]
         cfg = PreTrainedConfig.from_pretrained(repo)
         cfg.device = runs.device()
         policy = SmolVLAPolicy.from_pretrained(repo, config=cfg).eval()
@@ -224,7 +224,7 @@ def run_unit(unit, name):
         trials.append(r)
         print(f"  {name} {unit} #{t}: {describe(r, plant)}", flush=True)
     (out / f"{unit}.json").write_text(json.dumps(dict(
-        model=name, repo=runs.repo(name), plant=plant, spot=spot, spot_cm=SPOTS[spot],
+        model=name, repo=runs.MODELS[name]["repo"], plant=plant, spot=spot, spot_cm=SPOTS[spot],
         trained_spot=spot in TRAINED_SPOTS, n_action_steps=N_ACTION_STEPS, max_steps=MAX_STEPS, trials=trials), indent=1))
     return dict(clip=unit, summary=f"{sum(r['success'] for r in trials)}/{TRIALS}")
 
@@ -235,15 +235,13 @@ def main():
     p.add_argument("--jobs", type=int, default=2, help="units run in parallel, each with its own copy of the model")
     args = p.parse_args()
     wanted = args.models or MODELS
-    if "base-0" in wanted:
-        raise SystemExit("base-0: smolvla_base as downloaded outputs SO-100 joint targets (6-d), not Panda actions")
     from huggingface_hub import repo_exists
-    models = [m for m in wanted if repo_exists(runs.repo(m))]  # fine-tuned ones appear as training finishes
+    models = [m for m in wanted if repo_exists(runs.MODELS[m]["repo"])]  # fine-tuned ones appear as training finishes
     if missing := [m for m in wanted if m not in models]:
         print(f"not on the Hub yet (skipped): {', '.join(missing)}")
     for name in models:
         todo = [u for u in UNITS if not (RESULTS / name / f"{u}.json").exists()]
-        print(f"\n=== {name} ({runs.repo(name)}): {len(todo)} of {len(UNITS)} units to run, {TRIALS} trials each", flush=True)
+        print(f"\n=== {name} ({runs.MODELS[name]["repo"]}): {len(todo)} of {len(UNITS)} units to run, {TRIALS} trials each", flush=True)
         for r in episodes.parallel_map(run_unit, todo, {"name": name}, args.jobs, name):
             if "error" in r:
                 print(f"{r['clip']}: FAILED: {r['error']}")
