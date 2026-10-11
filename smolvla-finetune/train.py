@@ -12,7 +12,7 @@ from huggingface_hub import HfApi, hf_hub_download
 
 import runs
 
-MODELS  = ["libero-1", "libero-2", "libero-4", "base-1", "base-2", "base-4"]  # to train, in order (README.md)
+MODELS  = ["libero-4", "libero-2", "libero-1", "base-4", "base-2", "base-1"]  # to train, in order (README.md)
 STEPS   = 10_000              # optimizer steps per model
 BATCH   = 32                  # samples per step
 LOG_EVERY = 100             # steps between the loss lines in the log

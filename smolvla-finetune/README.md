@@ -27,7 +27,8 @@ GPU runtime, one cell each:
 ```text
 !git clone https://github.com/edgarcancinoe/smart-pouring.git
 %cd smart-pouring
-!pip install -q "lerobot[smolvla,dataset]==0.6.1" && hf auth login
+!pip install -q "lerobot[smolvla,dataset]==0.6.1"
+from huggingface_hub import login; login()
 !./run train
 ```
 
