@@ -151,17 +151,19 @@ def trial(env, model, plant, spot, seed, video=None, viewer=None):
     frames, queue = [], []
     lifted = handled = False  # handled: lifted or knocked over, so the mug resting means the robot is done with it
     rest = steps = 0
-    t0 = time.time()
+    t0, t_policy = time.time(), 0.0  # t_policy: cameras + policy, the rest is physics (+ filming)
     while steps < MAX_STEPS:
         if not queue:
+            t1 = time.time()
             with lock():
                 frame = observe(e)
             queue = list(act(model, frame, task))
+            t_policy += time.time() - t1
         with lock():
             obs, *_ = env.step(queue.pop(0))
         steps += 1
         if steps % PROGRESS_EVERY == 0:
-            print(f"    {_cache['name']} {plant}-{spot}: step {steps}/{MAX_STEPS}, {time.time() - t0:.0f} s", flush=True)
+            print(f"    {_cache['name']} {plant}-{spot}: step {steps}/{MAX_STEPS}, {time.time() - t0:.0f} s ({t_policy:.0f} s cameras + policy)", flush=True)
         if viewer:
             viewer.sync()
             if not viewer.is_running():
@@ -218,6 +220,7 @@ def run_unit(unit, name):
     plant, spot = unit.split("-")[0], int(unit.split("-")[1])
     out = RESULTS / name
     (out / "videos").mkdir(parents=True, exist_ok=True)
+    torch.set_num_threads(1)  # parallel workers: each torch on every core would fight over the CPU
     model, env = load_model(name), scene(plant)
     trials = []
     for t in range(TRIALS):
