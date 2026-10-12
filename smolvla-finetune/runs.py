@@ -13,6 +13,7 @@ BASE    = "lerobot/smolvla_base"             # pretrained on SO arms
 #   k     -> phone demos per plant x start spot it is fine-tuned on (0 = not fine-tuned)
 #   repo  -> Hugging Face repo holding it (./run train pushes there, ./run eval loads from there)
 #   data  -> dataset it trains on (default DATASET)
+#   batch -> samples per step (default train.BATCH)
 MODELS = {
     "libero-0": dict(start=LIBERO,  k=0, repo=LIBERO),  # baseline: smolvla_libero as downloaded
     "libero-1": dict(start=LIBERO,  k=1, repo="edgarcancinoe/smolvla_water_libero-1"),
@@ -22,6 +23,9 @@ MODELS = {
     "base-2":   dict(start=BASE,    k=2, repo="edgarcancinoe/smolvla_water_base-2"),
     "base-4":   dict(start=BASE,    k=4, repo="edgarcancinoe/smolvla_water_base-4"),
     "libero-4s": dict(start=LIBERO, k=4, repo="edgarcancinoe/smolvla_water_libero-4s", data=SHIFTED),
+    "base-4s":   dict(start=BASE,   k=4, repo="edgarcancinoe/smolvla_water_base-4s",   data=SHIFTED),
+    "libero-4s-b64": dict(start=LIBERO, k=4, repo="edgarcancinoe/smolvla_water_libero-4s-b64", data=SHIFTED, batch=64),
+    "base-4s-b64":   dict(start=BASE,   k=4, repo="edgarcancinoe/smolvla_water_base-4s-b64",   data=SHIFTED, batch=64),
 }
 
 

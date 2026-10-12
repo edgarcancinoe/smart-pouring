@@ -50,7 +50,7 @@ def train(name):
            f"--dataset.episodes={episodes}",
            "--dataset.video_backend=pyav",  # AV1 videos: PyAV bundles a decoder; torchcodec uses whatever FFmpeg is installed
            f"--rename_map={json.dumps(runs.CAMERA_NAMES[start])}",
-           f"--batch_size={BATCH}",
+           f"--batch_size={model.get('batch', BATCH)}",
            "--num_workers=16",  # video decoding feeds the GPU: with LeRobot's default 4 it sat idle 2/3 of the time
            f"--steps={STEPS}",
            f"--save_freq={SAVE_EVERY}",
