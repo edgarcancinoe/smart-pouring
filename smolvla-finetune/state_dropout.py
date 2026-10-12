@@ -13,7 +13,7 @@ from wandb.sdk.wandb_run import Run
 if not hasattr(Run, "get_url"):
     Run.get_url = lambda self: self.url
 
-P = float(sys.argv.pop(1))
+P = 0.0  # set in __main__: the spawned data-loader workers re-run this file with the share already popped from argv
 _prepare_state = SmolVLAPolicy.prepare_state
 
 
@@ -25,7 +25,7 @@ def prepare_state(self, batch):
     return state
 
 
-SmolVLAPolicy.prepare_state = prepare_state  # evaluation (policy.eval()) sees the full state
-
 if __name__ == "__main__":
+    P = float(sys.argv.pop(1))
+    SmolVLAPolicy.prepare_state = prepare_state  
     lerobot_train.main()
