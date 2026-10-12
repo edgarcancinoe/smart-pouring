@@ -35,7 +35,7 @@ import wandb; wandb.login()
 
 ## Evaluation
 
-3 plants × 8 mug start spots × 7 trials per model = 168
+3 plants × 8 mug start spots × 5 trials per model = 120
 
 - Spots 1–4 are where the phone demos started
 - Spots 5–8 are new, 7–10 cm from every trained spot

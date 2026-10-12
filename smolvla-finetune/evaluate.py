@@ -10,6 +10,8 @@ Usage: ./run eval [libero-0 libero-4 libero-4@10000 ...] [--jobs 2]   (default: 
 import argparse
 import contextlib
 import json
+import multiprocessing
+import threading
 import time
 from pathlib import Path
 
@@ -35,10 +37,9 @@ SPOTS = {**{i + 1: tuple(xy) for i, xy in enumerate(sorted(episodes.SETUP["mug_s
          5: (-21.0, 24.0), 6: (-8.0, 16.0), 7: (4.0, 28.0), 8: (24.0, 18.0)}
 TRAINED_SPOTS = (1, 2, 3, 4)
 # models evaluated when ./run eval names none (<init>-<k>: README.md); one not on the Hub yet is skipped
-MODELS = ["libero-0", "libero-1", "libero-2", "libero-4", "base-1", "base-2", "base-4", "libero-4s", "base-4s",
-          "libero-4s-b64", "base-4s-b64"]
+MODELS = ["libero-4", "base-4", "libero-4s", "base-4s", "libero-4s-b64", "base-4s-b64"]
 UNITS = [f"{plant}-{spot}" for plant in PLANTS for spot in SPOTS]  # every plant x spot; or e.g. ["left-1", "right-6"]
-TRIALS = 7              # trials per plant x spot (24 x 7 = 168 per model)
+TRIALS = 5              # trials per plant x spot (24 x 5 = 120 per model; the first evals ran 7)
 SEED = 0                # trial seeds derive from it (mug jitter, policy noise): the same for every model
 MUG_JITTER = 0.01       # m, uniform +- around the spot
 N_ACTION_STEPS = 10     # actions run from each predicted chunk (50) before the policy looks again
@@ -49,7 +50,9 @@ TOPPLED_DEG = 45.0      # ... as knocked over tilted this far
 RELEASE_CM = 8.0        # ... as released with the gripper point this far from it
 REST_S = 1.0            # end the trial once a lifted or knocked-over mug has rested, released, this long
 VIDEO_TRIALS = 1        # trials per unit filmed
-PROGRESS_EVERY = 200    # control steps between progress lines while a trial runs
+PRINT_EVERY = 30        # s between the progress lines (trials done, lifted/succeeded so far, time left)
+VERBOSE = False         # also print every trial, and a clock line every PROGRESS_EVERY steps of it
+PROGRESS_EVERY = 200    # control steps between those clock lines
 VIDEO_EVERY = 2         # film every Nth control step
 VIDEO_SIZE = 256        # px per camera panel
 RESULTS = Path(__file__).parent / "results"
@@ -184,7 +187,7 @@ def trial(env, model, plant, spot, seed, video=None, viewer=None, grasp=False):
         with lock():
             obs, *_ = env.step(queue.pop(0))
         steps += 1
-        if steps % PROGRESS_EVERY == 0:
+        if VERBOSE and steps % PROGRESS_EVERY == 0:
             print(f"    {_cache['name']} {plant}-{spot}: step {steps}/{MAX_STEPS}, {time.time() - t0:.0f} s ({t_policy:.0f} s cameras + policy)", flush=True)
         if viewer:
             viewer.sync()
@@ -234,12 +237,13 @@ def describe(r, plant, grasp=False):
             f"({r['steps']} steps, {r['seconds']:.0f} s)")
 
 
-def run_unit(unit, name, grasp=False):
+def run_unit(unit, name, grasp=False, tally=None, lock=None):
     """TRIALS trials of one plant x spot -> results/<model>/<unit>.json.
 
     unit  -> "<plant>-<spot>", e.g. "left-6"
     name  -> model name
     grasp -> grasp-only trials -> results/grasp-n<N_ACTION_STEPS>/<model>/<unit>.json
+    tally -> shared {trials, hits} the main process prints progress from, or None; lock guards it
     returns {clip: unit, summary}
     """
     plant, spot = unit.split("-")[0], int(unit.split("-")[1])
@@ -252,7 +256,12 @@ def run_unit(unit, name, grasp=False):
         video = out / "videos" / f"{unit}.mp4" if t < VIDEO_TRIALS else None
         r = trial(env, model, plant, spot, trial_seed(plant, spot, t), video, grasp=grasp)
         trials.append(r)
-        print(f"  {name} {unit} #{t}: {describe(r, plant, grasp)}", flush=True)
+        if VERBOSE:
+            print(f"  {name} {unit} #{t}: {describe(r, plant, grasp)}", flush=True)
+        if tally is not None:
+            with lock:
+                tally["trials"] += 1
+                tally["hits"] += r["lifted" if grasp else "success"]
     (out / f"{unit}.json").write_text(json.dumps(dict(
         model=name, repo="@".join(filter(None, runs.repo(name))), plant=plant, spot=spot, spot_cm=SPOTS[spot],
         trained_spot=spot in TRAINED_SPOTS, n_action_steps=N_ACTION_STEPS, max_steps=GRASP_STEPS if grasp else MAX_STEPS,
@@ -273,16 +282,31 @@ def main():
     if missing := [m for m in wanted if m not in models]:
         print(f"not on the Hub yet (skipped): {', '.join(missing)}")
     out = RESULTS / f"grasp-n{N_ACTION_STEPS}" if args.grasp else RESULTS
+    label = "lifted" if args.grasp else "succeeded"
+    manager = multiprocessing.Manager()  # the workers' shared trial tally
     for name in models:
         todo = [u for u in UNITS if not (out / name / f"{u}.json").exists()]
         print(f"\n=== {name}: {len(todo)} of {len(UNITS)} units to run, {TRIALS} trials each", flush=True)
-        lifted = 0
-        for r in episodes.parallel_map(run_unit, todo, {"name": name, "grasp": args.grasp}, args.jobs, name):
+        tally, lock, stop = manager.dict(trials=0, hits=0), manager.Lock(), threading.Event()
+        total, t0 = len(todo) * TRIALS, time.time()
+
+        def report():
+            t, h, took = tally["trials"], tally["hits"], time.time() - t0
+            left = f", ~{episodes._clock(took / t * (total - t))} left" if 0 < t < total else ""
+            print(f"  {name}: {t}/{total} trials, {h} {label} ({h / max(t, 1):.0%}) · {episodes._clock(took)}{left}", flush=True)
+
+        def ticker():
+            while not stop.wait(PRINT_EVERY):
+                report()
+
+        threading.Thread(target=ticker, daemon=True).start()
+        for r in episodes.parallel_map(run_unit, todo, {"name": name, "grasp": args.grasp, "tally": tally, "lock": lock},
+                                       args.jobs, name):
             if "error" in r:
                 print(f"{r['clip']}: FAILED: {r['error']}")
-            else:
-                lifted += int(r["summary"].split("/")[0])
-        print(f"{name}: {lifted}/{len(todo) * TRIALS} {'lifted' if args.grasp else 'succeeded'} (units run now)")
+        stop.set()
+        report()
+        print(f"{name}: {tally['hits']}/{tally['trials']} {label} (units run now)")
     print(f"\nresults: {RESULTS.relative_to(Path.cwd())}/<model>/  (./run compare for tables and plots)")
 
 
