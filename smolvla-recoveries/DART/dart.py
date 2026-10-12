@@ -9,7 +9,6 @@ import zlib
 
 import numpy as np
 
-import runs
 from dataset import episodes
 from dataset.export_lerobot import export
 from dataset.retarget import robot_replay
@@ -17,11 +16,11 @@ from dataset.retarget.robot_replay import MAX_STEP
 from dataset.sim_runs import playback
 from dataset.upload import upload
 
-RUNS = 2            # noisy replays per recording (<clip>~d1, ~d2), each with its own mug shift as well
+RUNS = 16           # noisy replays per recording (<clip>~d1 ... ~d16), each with its own mug shift as well
 NOISE_CM = 1.0      # std of the push added to each step's position command, cm
 NOISE_DEG = 2.0     # ... to its rotation command, deg
 RHO = 0.9           # push correlation from step to step (~0.5 s at 20 Hz): slow drifts, like a policy's errors
-NAME = "water_pour_dart"  # local dataset folder (dataset/data/lerobot/<NAME>); Hub repo: runs.DART
+NAME = "water_pour_dart_xl"  # dataset: dataset/data/lerobot/<NAME> and edgarcancinoe/<NAME> (RUNS = 2 made water_pour_dart)
 
 SIGMA = np.r_[[NOISE_CM / 100] * 3, [np.radians(NOISE_DEG)] * 3] / MAX_STEP  # push std in action units
 _state = {}  # per clip: random generator and the current push
@@ -62,9 +61,10 @@ def main():
     args = p.parse_args()
     if args.export:
         export(playback.saved(), NAME)  # the recordings, their shifted replays and the DART replays
-        upload(NAME, runs.DART)
+        upload(NAME, f"edgarcancinoe/{NAME}")
         return
-    clips = [f"{c}~d{i}" for c in args.clips or episodes.tracked() for i in range(1, RUNS + 1)]
+    clips = [f"{c}~d{i}" for c in args.clips or episodes.tracked() for i in range(1, RUNS + 1)
+             if not (episodes.DATA / "dart" / f"{c}~d{i}" / "robot.json").exists()]  # done before (same seed): skip
     done = 0
     for r in episodes.parallel_map(run, clips, {}, args.jobs, "dart"):
         if "error" in r:
