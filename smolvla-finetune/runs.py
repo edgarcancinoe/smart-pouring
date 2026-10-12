@@ -10,12 +10,13 @@ LIBERO  = "HuggingFaceVLA/smolvla_libero"   # pretrained on LIBERO: same Panda
 BASE    = "lerobot/smolvla_base"             # pretrained on SO arms
 
 # Every model compared.
-#   start -> checkpoint it starts from
+#   start -> checkpoint it starts from, or another model's name: continue fine-tuning that model (DAgger)
 #   k     -> phone demos per plant x start spot it is fine-tuned on (0 = not fine-tuned)
 #   repo  -> Hugging Face repo holding it (./run train pushes there, ./run eval loads from there)
 #   data  -> dataset it trains on (default DATASET)
 #   batch -> samples per step (default train.BATCH)
 #   dropout -> share of training samples with the robot state zeroed (default train.STATE_DROPOUT)
+#   steps -> optimizer steps (default train.STEPS)
 MODELS = {
     "libero-0": dict(start=LIBERO,  k=0, repo=LIBERO),  # baseline: smolvla_libero as downloaded
     "libero-1": dict(start=LIBERO,  k=1, repo="edgarcancinoe/smolvla_water_libero-1"),
@@ -31,6 +32,9 @@ MODELS = {
     "libero-4s-sd":  dict(start=LIBERO, k=4, repo="edgarcancinoe/smolvla_water_libero-4s-sd", data=SHIFTED, dropout=0.3),
     "base-4s-sd":    dict(start=BASE,   k=4, repo="edgarcancinoe/smolvla_water_base-4s-sd",   data=SHIFTED, dropout=0.3),
     "libero-4s-dart": dict(start=LIBERO, k=4, repo="edgarcancinoe/smolvla_water_libero-4s-dart", data=DART),
+    # libero-4s, trained further on SHIFTED + the teacher's takeovers from its own rollouts (smolvla-recoveries/DAgger)
+    "libero-4s-dagger1": dict(start="libero-4s", k=4, repo="edgarcancinoe/smolvla_water_libero-4s-dagger1",
+                              data="edgarcancinoe/water_pour_dagger1", steps=8_000),
 }
 
 
@@ -39,6 +43,12 @@ CAMERA_NAMES = {
     BASE: {"observation.images.image": "observation.images.camera1",
            "observation.images.image2": "observation.images.camera2"},
 }
+
+
+def pretrained(name):
+    """The pretrained checkpoint (LIBERO or BASE) a model comes from, through the models it continues."""
+    start = MODELS[name]["start"]
+    return pretrained(start) if start in MODELS else start
 
 
 def repo(name):
@@ -56,11 +66,14 @@ def device():
 def pick(clips, k):
     """
     clips -> clip name of each dataset episode, in episode order (meta/clips.json)
-    k     -> recordings per pair; each comes with its shifted replays (A1-0~1, ...)
+    k     -> recordings per pair; each comes with its shifted replays (A1-0~1, ...); DAgger takeovers are always kept
     """
     pairs, chosen = {}, []
     for i, clip in sorted(enumerate(clips), key=lambda ic: episodes.sort_key(ic[1])):
         p = episodes.parse(clip)
+        if p is None:  # a DAgger takeover (r1-left-2-0-t0): not from one recording
+            chosen.append((i, clip))
+            continue
         recs = pairs.setdefault((p["plant"], p["position"]), [])
         if p["rep"] not in recs and len(recs) < k:
             recs.append(p["rep"])

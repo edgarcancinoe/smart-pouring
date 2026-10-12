@@ -29,6 +29,8 @@ def train(name):
     """
     model = runs.MODELS[name]
     start, k, repo = model["start"], model["k"], model["repo"]
+    path = runs.MODELS[start]["repo"] if start in runs.MODELS else start  # a model name: continue from that fine-tuned model
+    steps = model.get("steps", STEPS)
     data = model.get("data", runs.DATASET)
 
     if HfApi().file_exists(repo, "demos.json"):  # uploaded last: the model is done
@@ -43,18 +45,18 @@ def train(name):
     if out.exists():
         shutil.rmtree(out)  # LeRobot refuses an existing output folder
     cmd = [sys.executable, str(Path(__file__).parent / "state_dropout.py"), str(model.get("dropout", STATE_DROPOUT)),
-           f"--policy.path={start}",
+           f"--policy.path={path}",
            f"--policy.repo_id={repo}",
            "--policy.push_to_hub=true",  # the checkpoint's own config may say otherwise
            f"--policy.device={runs.device()}",
-           f"--policy.scheduler_decay_steps={STEPS}",  # decay over this run's length (default: 30k steps)
+           f"--policy.scheduler_decay_steps={steps}",  # decay over this run's length (default: 30k steps)
            f"--dataset.repo_id={data}",
            f"--dataset.episodes={episodes}",
            "--dataset.video_backend=pyav",  # AV1 videos: PyAV bundles a decoder; torchcodec uses whatever FFmpeg is installed
-           f"--rename_map={json.dumps(runs.CAMERA_NAMES[start])}",
+           f"--rename_map={json.dumps(runs.CAMERA_NAMES[runs.pretrained(name)])}",
            f"--batch_size={model.get('batch', BATCH)}",
            "--num_workers=16",  # video decoding feeds the GPU: with LeRobot's default 4 it sat idle 2/3 of the time
-           f"--steps={STEPS}",
+           f"--steps={steps}",
            f"--save_freq={SAVE_EVERY}",
            f"--log_freq={LOG_EVERY}",
            f"--output_dir={out}",

@@ -120,6 +120,32 @@ def film(e, caption):
     return np.hstack(imgs)
 
 
+def reset(env, spot, rng, jitter=MUG_JITTER):
+    """A trial's start: robot in START_Q, mug on its spot (+- jitter), droplets settled.
+
+    env    -> env from scene(plant)
+    spot   -> mug start spot 1-8
+    rng    -> numpy random generator (mug jitter)
+    jitter -> m, uniform +- around the spot
+    returns the first observation
+    """
+    e = env.env
+    env.reset()
+    e.robots[0].controller.update_initial_joints(START_Q)  # the posture the controller relaxes toward
+    e.set_layout(np.add(real_to_sim(SPOTS[spot]), rng.uniform(-jitter, jitter, 2)), POTS)
+
+    
+    # Safe droplet settling for 200 steps.
+    idx, vel = e.robots[0]._ref_joint_pos_indexes, e.robots[0]._ref_joint_vel_indexes
+    q_arm = e.sim.data.qpos[idx].copy()
+    for _ in range(200):
+        e.sim.data.qpos[idx], e.sim.data.qvel[vel] = q_arm, 0
+        e.sim.step()
+    
+    obs, *_ = env.step(OPEN)  # one open-gripper step
+    return obs
+
+
 def trial(env, model, plant, spot, seed, video=None, viewer=None, grasp=False):
     """One episode: place the scene, let the policy act, measure where the water and the mug ended.
 
@@ -140,16 +166,7 @@ def trial(env, model, plant, spot, seed, video=None, viewer=None, grasp=False):
     model[0].reset()
     task = f"Water the {plant} plant"
     with lock():
-        env.reset()
-        e.robots[0].controller.update_initial_joints(START_Q)  # the posture the controller relaxes toward
-        e.set_layout(np.add(real_to_sim(SPOTS[spot]), rng.uniform(-MUG_JITTER, MUG_JITTER, 2)), POTS)
-        # droplets settle in the mug; no controller runs here, so hold the arm still against gravity
-        idx, vel = e.robots[0]._ref_joint_pos_indexes, e.robots[0]._ref_joint_vel_indexes
-        q_arm = e.sim.data.qpos[idx].copy()
-        for _ in range(200):
-            e.sim.data.qpos[idx], e.sim.data.qvel[vel] = q_arm, 0
-            e.sim.step()
-        obs, *_ = env.step(OPEN)  # one open-gripper step, as every demo began
+        obs = reset(env, spot, rng)
     start, *_ = mug_pose(e)
 
     frames, queue = [], []

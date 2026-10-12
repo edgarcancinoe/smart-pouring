@@ -22,6 +22,9 @@
 #   ./run dart   [A1-0 ...] [--jobs 4]      DART: each recording replayed with noise pushes on the way to the mug
 #   ./run dart-export                       every saved robot run -> DART dataset -> Hugging Face Hub
 #   ./run dart-train                        fine-tune the DART models on it, push to the Hub
+#   ./run dagger-check [--jobs 8]           takeover DAgger: the teacher alone must grasp from pushed-off starts
+#   ./run dagger       [--jobs 8]           the policy reaches, the teacher takes over when it drifts: takeovers saved
+#   ./run dagger-export                     demos + takeovers -> DAgger dataset -> Hugging Face Hub (then ./run train libero-4s-dagger1)
 
 cd "$(dirname "$0")" || exit 1
 export PYTHONPATH=. PYTHONWARNINGS=ignore PYTHONUNBUFFERED=1
@@ -50,6 +53,9 @@ case "$cmd" in
   dart)        PYTHONPATH=.:smolvla-finetune MUJOCO_GL=$gl exec $py smolvla-recoveries/DART/dart.py "$@" ;;
   dart-export) PYTHONPATH=.:smolvla-finetune MUJOCO_GL=$gl exec $py smolvla-recoveries/DART/dart.py --export ;;
   dart-train)  PYTHONPATH=.:smolvla-finetune exec $py smolvla-recoveries/DART/train_dart.py ;;
+  dagger)        PYTHONPATH=.:smolvla-finetune MUJOCO_GL=$gl exec $py smolvla-recoveries/DAgger/dagger.py "$@" ;;
+  dagger-check)  PYTHONPATH=.:smolvla-finetune MUJOCO_GL=$gl exec $py smolvla-recoveries/DAgger/dagger.py --check "$@" ;;
+  dagger-export) PYTHONPATH=.:smolvla-finetune MUJOCO_GL=$gl exec $py smolvla-recoveries/DAgger/dagger.py --export ;;
   *)         [ -f sim/tools/run ] && . sim/tools/run  # local-only commands, if present (gitignored)
-             sed -n '2,24p' "$0" | sed 's/^# //' ;;
+             sed -n '2,27p' "$0" | sed 's/^# //' ;;
 esac

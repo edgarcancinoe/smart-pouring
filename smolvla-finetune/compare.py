@@ -33,8 +33,7 @@ def losses():
         except (EntryNotFoundError, RepositoryNotFoundError):
             continue  # not trained yet
         loss = [float(x) for x in re.findall(r" loss:([\d.]+)", log)]  # one line per LOG_EVERY steps
-        ax.plot(np.arange(1, len(loss) + 1) * LOG_EVERY, loss, color=COLORS[m["start"]],
-                ls=(0, (3, 1, 1, 1, 1, 1)) if "batch" in m else "-." if "data" in m else {1: ":", 2: "--", 4: "-"}[m["k"]], lw=1.5, label=name)
+        ax.plot(np.arange(1, len(loss) + 1) * LOG_EVERY, loss, color=COLORS[runs.pretrained(name)], ls=(0, (3, 1, 1, 1, 1, 1)) if "batch" in m else "-." if "data" in m else {1: ":", 2: "--", 4: "-"}[m["k"]], lw=1.5, label=name)
     ax.set_xlabel("training step")
     ax.set_ylabel("loss")
     ax.set_yscale("log")
