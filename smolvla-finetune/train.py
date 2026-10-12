@@ -41,10 +41,11 @@ def train(name):
     episodes, demos = runs.pick(clips, k)
     print(f"\n=== {name}: {start} + {len(episodes)} demos -> {repo}")
 
+    hub = HfApi()
+    hub.create_repo(repo, exist_ok=True)  # no write access: fail now, not after hours of training
     out = OUT / name
-    if out.exists():
-        shutil.rmtree(out)  # LeRobot refuses an existing output folder
-    cmd = [sys.executable, str(Path(__file__).parent / "state_dropout.py"), str(model.get("dropout", STATE_DROPOUT)),
+    final = out / "checkpoints" / f"{steps:06d}" / "pretrained_model"  # LeRobot saves it before its push
+    cmd =[sys.executable, str(Path(__file__).parent / "state_dropout.py"), str(model.get("dropout", STATE_DROPOUT)),
            f"--policy.path={path}",
            f"--policy.repo_id={repo}",
            "--policy.push_to_hub=true",  # the checkpoint's own config may say otherwise
@@ -65,17 +66,22 @@ def train(name):
            f"--wandb.project={WANDB_PROJECT}",
            "--wandb.disable_artifact=true"]  # checkpoints go to the Hub, not wandb
 
-    # show the training output and keep it in a log
     log = OUT / f"{name}.log"
-    with open(log, "w") as f:
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-        for line in proc.stdout:
-            print(line, end="")
-            f.write(line)
-    if proc.wait():
-        raise SystemExit(f"{name}: training failed, see {log}")
+    if final.exists():  # trained before but the push failed: upload it instead of training again
+        print(f"{name}: uploading the finished local checkpoint {final}")
+        hub.upload_folder(folder_path=final, repo_id=repo)
+    else:
+        if out.exists():
+            shutil.rmtree(out)  # LeRobot refuses an existing output folder
+        # show the training output and keep it in a log
+        with open(log, "w") as f:
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            for line in proc.stdout:
+                print(line, end="")
+                f.write(line)
+        if proc.wait():
+            raise SystemExit(f"{name}: training failed, see {log}")
 
-    hub = HfApi()
     hub.upload_file(path_or_fileobj=log, path_in_repo="train.log", repo_id=repo)
     hub.upload_file(path_or_fileobj=json.dumps(demos, indent=1).encode(), path_in_repo="demos.json", repo_id=repo)
     print(f"{name}: done -> https://huggingface.co/{repo}")
