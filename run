@@ -18,6 +18,11 @@
 #   ./run eval-watch                        one model, live in the MuJoCo viewer
 #   ./run compare                           every evaluated model: table + plots
 
+#  recoveries (smolvla-recoveries/)
+#   ./run dart   [A1-0 ...] [--jobs 4]      DART: each recording replayed with noise pushes on the way to the mug
+#   ./run dart-export                       every saved robot run -> DART dataset -> Hugging Face Hub
+#   ./run dart-train                        fine-tune the DART models on it, push to the Hub
+
 cd "$(dirname "$0")" || exit 1
 export PYTHONPATH=. PYTHONWARNINGS=ignore PYTHONUNBUFFERED=1
 py=.venv/bin/python
@@ -41,6 +46,10 @@ case "$cmd" in
   # cgl: the policy's cameras render offscreen while the viewer window runs (GLFW off the main thread crashes)
   eval-watch) MUJOCO_GL=cgl exec .venv/bin/mjpython smolvla-finetune/eval_watch.py "$@" ;;
   compare)   exec $py smolvla-finetune/compare.py "$@" ;;
+  # the recovery scripts import the fine-tuning code (runs, train)
+  dart)        PYTHONPATH=.:smolvla-finetune MUJOCO_GL=$gl exec $py smolvla-recoveries/DART/dart.py "$@" ;;
+  dart-export) PYTHONPATH=.:smolvla-finetune MUJOCO_GL=$gl exec $py smolvla-recoveries/DART/dart.py --export ;;
+  dart-train)  PYTHONPATH=.:smolvla-finetune exec $py smolvla-recoveries/DART/train_dart.py ;;
   *)         [ -f sim/tools/run ] && . sim/tools/run  # local-only commands, if present (gitignored)
-             sed -n '2,18p' "$0" | sed 's/^# //' ;;
+             sed -n '2,24p' "$0" | sed 's/^# //' ;;
 esac
