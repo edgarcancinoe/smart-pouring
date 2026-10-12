@@ -16,7 +16,7 @@ MODELS  = ["libero-4", "libero-2", "libero-1", "base-4", "base-2", "base-1"]  # 
 STEPS   = 25_000              # optimizer steps per model
 BATCH   = 32                  # samples per step
 LOG_EVERY = 100             # steps between the loss lines in the log
-SAVE_EVERY = 10_000          # steps between local checkpoints (outputs/train/<model>/checkpoints)
+SAVE_EVERY = 20_000          # steps between local checkpoints (outputs/train/<model>/checkpoints); LeRobot also saves the last step: 20k + 25k
 OUT = Path("outputs/train")
 
 
