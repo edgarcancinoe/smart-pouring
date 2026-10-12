@@ -2,7 +2,7 @@
 
 Writes results/<model>/<plant>-<spot>.json (one dict per trial) and videos/<plant>-<spot>.mp4.
 
-Usage: ./run eval [libero-0 libero-4 libero-4@10000 ...] [--jobs 2]   (default: MODELS; <model>@<step>: a local training checkpoint)
+Usage: ./run eval [libero-0 libero-4 libero-4@10000 ...] [--jobs 2]   (default: MODELS; <model>@<step>: the checkpoint at that step)
 (eval_watch.py: the same trials, live in the viewer)
 """
 import argparse
@@ -65,11 +65,11 @@ def load_model(name):
     from lerobot.policies.smolvla.modeling_smolvla import SmolVLAPolicy
 
     if _cache.get("name") != name:
-        repo = runs.repo(name)
-        cfg = PreTrainedConfig.from_pretrained(repo)
+        repo, rev = runs.repo(name)
+        cfg = PreTrainedConfig.from_pretrained(repo, revision=rev)
         cfg.device = runs.device()
-        policy = SmolVLAPolicy.from_pretrained(repo, config=cfg).eval()
-        pre, post = make_pre_post_processors(cfg, pretrained_path=repo,
+        policy = SmolVLAPolicy.from_pretrained(repo, config=cfg, revision=rev).eval()
+        pre, post = make_pre_post_processors(cfg, pretrained_path=repo, pretrained_revision=rev,
                                              preprocessor_overrides={"device_processor": {"device": cfg.device}})
         _cache.update(name=name, model=(policy, pre, post))
     return _cache["model"]
@@ -229,7 +229,7 @@ def run_unit(unit, name):
         trials.append(r)
         print(f"  {name} {unit} #{t}: {describe(r, plant)}", flush=True)
     (out / f"{unit}.json").write_text(json.dumps(dict(
-        model=name, repo=runs.repo(name), plant=plant, spot=spot, spot_cm=SPOTS[spot],
+        model=name, repo="@".join(filter(None, runs.repo(name))), plant=plant, spot=spot, spot_cm=SPOTS[spot],
         trained_spot=spot in TRAINED_SPOTS, n_action_steps=N_ACTION_STEPS, max_steps=MAX_STEPS, trials=trials), indent=1))
     return dict(clip=unit, summary=f"{sum(r['success'] for r in trials)}/{TRIALS}")
 
@@ -240,14 +240,14 @@ def main():
     p.add_argument("--jobs", type=int, default=2, help="units run in parallel, each with its own copy of the model")
     args = p.parse_args()
     wanted = args.models or MODELS
-    from huggingface_hub import repo_exists
-    # fine-tuned ones appear as training finishes; checkpoints (<model>@<step>) are local
-    models = [m for m in wanted if (Path(runs.repo(m)).exists() if "@" in m else repo_exists(runs.repo(m)))]
+    from huggingface_hub import file_exists
+    # fine-tuned ones (and their step-<n> branches) appear on the Hub as training finishes
+    models = [m for m in wanted if file_exists(runs.repo(m)[0], "model.safetensors", revision=runs.repo(m)[1])]
     if missing := [m for m in wanted if m not in models]:
-        print(f"not on the Hub / on disk yet (skipped): {', '.join(missing)}")
+        print(f"not on the Hub yet (skipped): {', '.join(missing)}")
     for name in models:
         todo = [u for u in UNITS if not (RESULTS / name / f"{u}.json").exists()]
-        print(f"\n=== {name} ({runs.repo(name)}): {len(todo)} of {len(UNITS)} units to run, {TRIALS} trials each", flush=True)
+        print(f"\n=== {name}: {len(todo)} of {len(UNITS)} units to run, {TRIALS} trials each", flush=True)
         for r in episodes.parallel_map(run_unit, todo, {"name": name}, args.jobs, name):
             if "error" in r:
                 print(f"{r['clip']}: FAILED: {r['error']}")

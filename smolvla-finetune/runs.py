@@ -30,10 +30,10 @@ CAMERA_NAMES = {
 
 
 def repo(name):
-    """Where a model loads from: its Hub repo, or for <model>@<step> (e.g. libero-4@10000) the local
-    checkpoint ./run train saved at that step."""
+    """Where a model loads from: Hub repo and revision. <model>@<step> (e.g. libero-4@10000) is the
+    checkpoint saved at that step, kept on the repo's branch step-<step>; a plain name is the final model (main)."""
     base, _, step = name.partition("@")
-    return f"outputs/train/{base}/checkpoints/{int(step):06d}/pretrained_model" if step else MODELS[base]["repo"]
+    return MODELS[base]["repo"], (f"step-{int(step)}" if step else None)
 
 
 def device():
