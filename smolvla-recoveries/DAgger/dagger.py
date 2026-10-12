@@ -51,7 +51,7 @@ def start(job):
     env = ev.scene(plant)
     obs = ev.reset(env, spot, rng, MUG_JITTER)
     mug, *_ = ev.mug_pose(env.env)
-    return plant, env, obs, mug, Teacher(env.env, plant, mug), rng
+    return plant, env, obs, mug, Teacher(env.env, plant, spot), rng
 
 
 def lifted(e, mug):
@@ -100,7 +100,7 @@ def rollout(job):
             takeover, took = playback.Recorder(e), k  # recording starts from the state the policy left
 
         # teacher driving, for long enough, and the hand is back on the path: the policy takes the wheel again
-        elif takeover is not None and k - took >= MIN_TAKEOVER and off < BACK_CM:
+        elif takeover is not None and k - took >= MIN_TAKEOVER and off < BACK_CM and not teacher.busy:
             save(takeover, f"r{ROUND}-{job}-t{n}", plant, True)  # this takeover -> its own short demo (t0, t1, ...)
             takeover, queue, n = None, [], n + 1  # the policy plans again from where the teacher left it
 
