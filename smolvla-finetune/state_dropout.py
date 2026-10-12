@@ -8,6 +8,10 @@ import sys
 import torch
 from lerobot.policies.smolvla.modeling_smolvla import SmolVLAPolicy
 from lerobot.scripts import lerobot_train
+from wandb.sdk.wandb_run import Run
+
+if not hasattr(Run, "get_url"):
+    Run.get_url = lambda self: self.url
 
 P = float(sys.argv.pop(1))
 _prepare_state = SmolVLAPolicy.prepare_state
