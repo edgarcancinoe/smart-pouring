@@ -59,6 +59,16 @@ def eef_pose(obs):
     return obs["robot0_eef_pos"].copy(), R.from_quat(obs["robot0_eef_quat"])
 
 
+def perturb(action, phase, steps):
+    """The action the arm executes; the recorded one is always the clean action (smolvla-recoveries/ may override this).
+
+    action -> (7,) clean action from action_to
+    phase  -> label of the step ("reach" / "grasp" / ...)
+    steps  -> step budget of the drive() call it comes from (1: a step along a scripted line)
+    """
+    return action
+
+
 def action_to(obs, p_target, r_target, grip):
     """Delta action toward a target pose (clipped to the controller's per-step range).
 
@@ -199,7 +209,7 @@ def run(clip):
         for _ in range(steps):
             a, delta = action_to(obs, p_t, r_t, grip)
             e.set_ghost("ghost_grip", p_t, wxyz(r_t))
-            obs, *_ = env.step(a)
+            obs, *_ = env.step(perturb(a, phase, steps))
             rec.add(a, phase)
             if np.linalg.norm(delta[:3]) < tol[0] and np.degrees(np.linalg.norm(delta[3:])) < tol[1]:
                 break

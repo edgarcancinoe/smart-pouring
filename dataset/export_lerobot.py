@@ -57,11 +57,12 @@ def result(clip):
     return json.loads(path.read_text()) if path.exists() else {}
 
 
-def main():
-    p = argparse.ArgumentParser()
-    p.add_argument("clips", nargs="*")
-    args = p.parse_args()
-    clips = args.clips or playback.saved()
+def export(clips, name=NAME):
+    """Saved robot runs -> LeRobot dataset in dataset/data/lerobot/<name>/ (successful runs only, unless ALL).
+
+    clips -> clip names
+    name  -> dataset folder name
+    """
     keep = [c for c in clips if ALL or result(c).get("success")]
     skipped = sorted(set(clips) - set(keep), key=episodes.sort_key)
     if skipped:
@@ -70,12 +71,10 @@ def main():
         raise SystemExit(f"nothing to export: no successful robot run has saved states ({playback.FILE}). Runs made before "
                          "./run robot saved them have only robot.json; re-run ./run robot for those clips")
 
-    root = episodes.DATA / "lerobot" / NAME
+    root = episodes.DATA / "lerobot" / name
     if root.exists():
         shutil.rmtree(root)
-    ds = LeRobotDataset.create(f"local/{NAME}", fps=playback.load(keep[0])["control_hz"],
-                               features=FEATURES, root=root, robot_type="panda", use_videos=True,
-                               streaming_encoding=True)  # encode frames as they come, no PNG round trip
+    ds = LeRobotDataset.create(f"local/{name}", fps=playback.load(keep[0])["control_hz"], features=FEATURES, root=root, robot_type="panda", use_videos=True, streaming_encoding=True)
     env = playback.scene()
     e = env.env
     frames = 0
@@ -93,6 +92,13 @@ def main():
     (root / "meta" / "clips.json").write_text(json.dumps(keep))
     env.close()
     print(f"\n{len(keep)} episodes, {frames} frames ({frames / ds.fps / 60:.1f} min at {ds.fps} fps) -> {root}")
+
+
+def main():
+    p = argparse.ArgumentParser()
+    p.add_argument("clips", nargs="*")
+    args = p.parse_args()
+    export(args.clips or [c for c in playback.saved() if not (episodes.parse(c) or {}).get("dart")])  # DART runs: their own dataset
 
 
 if __name__ == "__main__":

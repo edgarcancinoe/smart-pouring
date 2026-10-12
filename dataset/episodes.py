@@ -3,7 +3,7 @@
 dataset/data/<group>/<clip>/ holds a clip's recording (<clip>.MOV) and everything made from it.
 Episodes: water-pour/<plant><position>-<rep>, A1-0 ... C4-3 (plant A/B/C = left/middle/right,
 start position 1-4, repetition 0-3). A1-0~1 ... A1-0~3: the same recording replayed with the mug shifted
-(dataset/retarget/robot_replay.py SHIFTS), in its own folder.
+(dataset/retarget/robot_replay.py SHIFTS), in its own folder. A1-0~d1, ...: replayed with noise pushes (DART), in data/dart/.
 """
 import json
 import multiprocessing
@@ -21,21 +21,24 @@ CALIBRATION_VIDEOS = DATA / "calibration"
 HUB_DATASET = "edgarcancinoe/water_pour_shift"  # the LeRobot dataset on the Hugging Face Hub (./run upload)
 SETUP = json.loads((ROOT / "setup.json").read_text())  # measured layout and sizes, floor frame (cm)
 PLANTS = {"A": "left", "B": "middle", "C": "right"}
-_NAME = re.compile(r"^([ABC])([1-4])-([0-3])(?:~(\d+))?$", re.IGNORECASE)
+_NAME = re.compile(r"^([ABC])([1-4])-([0-3])(?:~(d?)(\d+))?$", re.IGNORECASE)
 
 
 def parse(clip):
-    """Expected plant, start position (1-4), repetition (0-3) and shifted replay (0 = none) from the name; None for other names."""
+    """Expected plant, start position (1-4), repetition (0-3), shifted replay (0 = none) and whether it is a DART replay
+    from the name; None for other names."""
     m = _NAME.match(clip)
     if not m:
         return None
-    return dict(plant=PLANTS[m.group(1).upper()], position=int(m.group(2)), rep=int(m.group(3)), shift=int(m.group(4) or 0))
+    return dict(plant=PLANTS[m.group(1).upper()], position=int(m.group(2)), rep=int(m.group(3)), shift=int(m.group(5) or 0),
+                dart=bool(m.group(4)))
 
 
 def sort_key(clip):
-    """A1-0, A1-0~1, ..., A1-1, ..., A4-3, B1-0, ...; other names after."""
+    """A1-0, A1-0~1, ..., A1-0~d1, ..., A1-1, ..., A4-3, B1-0, ...; other names after."""
     m = _NAME.match(clip)
-    return (0, m.group(1).upper(), int(m.group(2)), int(m.group(3)), int(m.group(4) or 0), "") if m else (1, "", 0, 0, 0, clip)
+    return (0, m.group(1).upper(), int(m.group(2)), int(m.group(3)), m.group(4) or "", int(m.group(5) or 0), "") if m \
+        else (1, "", 0, 0, "", 0, clip)
 
 
 def groups():

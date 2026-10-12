@@ -3,6 +3,7 @@ from dataset import episodes
 
 DATASET = "edgarcancinoe/water_pour"  # the demos with the mug exactly on its 4 measured spots
 SHIFTED = episodes.HUB_DATASET       # the same + each replayed with the mug shifted (robot_replay.py SHIFTS)
+DART    = "edgarcancinoe/water_pour_dart"  # SHIFTED + each replayed with noise pushes on the way to the mug (smolvla-recoveries/DART)
 
 # The two pretrained checkpoints every model starts from
 LIBERO  = "HuggingFaceVLA/smolvla_libero"   # pretrained on LIBERO: same Panda
@@ -29,6 +30,7 @@ MODELS = {
     "base-4s-b64":   dict(start=BASE,   k=4, repo="edgarcancinoe/smolvla_water_base-4s-b64",   data=SHIFTED, batch=64),
     "libero-4s-sd":  dict(start=LIBERO, k=4, repo="edgarcancinoe/smolvla_water_libero-4s-sd", data=SHIFTED, dropout=0.3),
     "base-4s-sd":    dict(start=BASE,   k=4, repo="edgarcancinoe/smolvla_water_base-4s-sd",   data=SHIFTED, dropout=0.3),
+    "libero-4s-dart": dict(start=LIBERO, k=4, repo="edgarcancinoe/smolvla_water_libero-4s-dart", data=DART),
 }
 
 
