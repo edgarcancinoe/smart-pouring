@@ -14,6 +14,7 @@ BASE    = "lerobot/smolvla_base"             # pretrained on SO arms
 #   repo  -> Hugging Face repo holding it (./run train pushes there, ./run eval loads from there)
 #   data  -> dataset it trains on (default DATASET)
 #   batch -> samples per step (default train.BATCH)
+#   dropout -> share of training samples with the robot state zeroed (default train.STATE_DROPOUT)
 MODELS = {
     "libero-0": dict(start=LIBERO,  k=0, repo=LIBERO),  # baseline: smolvla_libero as downloaded
     "libero-1": dict(start=LIBERO,  k=1, repo="edgarcancinoe/smolvla_water_libero-1"),
@@ -26,6 +27,8 @@ MODELS = {
     "base-4s":   dict(start=BASE,   k=4, repo="edgarcancinoe/smolvla_water_base-4s",   data=SHIFTED),
     "libero-4s-b64": dict(start=LIBERO, k=4, repo="edgarcancinoe/smolvla_water_libero-4s-b64", data=SHIFTED, batch=64),
     "base-4s-b64":   dict(start=BASE,   k=4, repo="edgarcancinoe/smolvla_water_base-4s-b64",   data=SHIFTED, batch=64),
+    "libero-4s-sd":  dict(start=LIBERO, k=4, repo="edgarcancinoe/smolvla_water_libero-4s-sd", data=SHIFTED, dropout=0.3),
+    "base-4s-sd":    dict(start=BASE,   k=4, repo="edgarcancinoe/smolvla_water_base-4s-sd",   data=SHIFTED, dropout=0.3),
 }
 
 

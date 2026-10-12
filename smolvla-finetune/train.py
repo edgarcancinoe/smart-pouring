@@ -15,8 +15,10 @@ import runs
 MODELS  = ["libero-4", "libero-2", "libero-1", "base-4", "base-2", "base-1"]  # to train, in order (README.md)
 STEPS   = 25_000              # optimizer steps per model
 BATCH   = 32                  # samples per step
+STATE_DROPOUT = 0.0           # share of training samples with the robot state zeroed (state_dropout.py)
 LOG_EVERY = 100             # steps between the loss lines in the log
 SAVE_EVERY = 20_000          # steps between local checkpoints (outputs/train/<model>/checkpoints); LeRobot also saves the last step: 20k + 25k
+WANDB_PROJECT = "smart-pouring"  # live loss curves at wandb.ai/<you>/smart-pouring
 OUT = Path("outputs/train")
 
 
@@ -40,7 +42,7 @@ def train(name):
     out = OUT / name
     if out.exists():
         shutil.rmtree(out)  # LeRobot refuses an existing output folder
-    cmd = [sys.executable, "-m", "lerobot.scripts.lerobot_train",
+    cmd = [sys.executable, str(Path(__file__).parent / "state_dropout.py"), str(model.get("dropout", STATE_DROPOUT)),
            f"--policy.path={start}",
            f"--policy.repo_id={repo}",
            "--policy.push_to_hub=true",  # the checkpoint's own config may say otherwise
@@ -56,7 +58,10 @@ def train(name):
            f"--save_freq={SAVE_EVERY}",
            f"--log_freq={LOG_EVERY}",
            f"--output_dir={out}",
-           "--wandb.enable=false"]
+           f"--job_name={name}",  # run name on wandb
+           "--wandb.enable=true",
+           f"--wandb.project={WANDB_PROJECT}",
+           "--wandb.disable_artifact=true"]  # checkpoints go to the Hub, not wandb
 
     # show the training output and keep it in a log
     log = OUT / f"{name}.log"

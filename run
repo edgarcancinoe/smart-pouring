@@ -14,6 +14,7 @@
 #  policy (SmolVLA, smolvla-finetune/)
 #   ./run train  [libero-4 ...]             fine-tune, push to the Hub (CUDA; smolvla-finetune/README.md)
 #   ./run eval   [libero-4 ...] [--jobs 2]  models in the sim: 3 plants x 8 spots x N trials -> results/
+#   ./run eval-grasp [libero-4 ...] [--jobs 2]  the same trials, ended once the mug is lifted -> results/grasp-n<N>/
 #   ./run eval-watch                        one model, live in the MuJoCo viewer
 #   ./run compare                           every evaluated model: table + plots
 
@@ -36,9 +37,10 @@ case "$cmd" in
   upload)    exec $py dataset/upload.py "$@" ;;
   train)     exec $py smolvla-finetune/train.py "$@" ;;
   eval)      MUJOCO_GL=$gl exec $py smolvla-finetune/evaluate.py "$@" ;;
+  eval-grasp) MUJOCO_GL=$gl exec $py smolvla-finetune/evaluate.py --grasp "$@" ;;
   # cgl: the policy's cameras render offscreen while the viewer window runs (GLFW off the main thread crashes)
   eval-watch) MUJOCO_GL=cgl exec .venv/bin/mjpython smolvla-finetune/eval_watch.py "$@" ;;
   compare)   exec $py smolvla-finetune/compare.py "$@" ;;
   *)         [ -f sim/tools/run ] && . sim/tools/run  # local-only commands, if present (gitignored)
-             sed -n '2,17p' "$0" | sed 's/^# //' ;;
+             sed -n '2,18p' "$0" | sed 's/^# //' ;;
 esac

@@ -1,8 +1,10 @@
 """SmolVLA models drive the Panda in the watering scene: 3 plants x 8 start spots x TRIALS. See README.md.
 
 Writes results/<model>/<plant>-<spot>.json (one dict per trial) and videos/<plant>-<spot>.mp4.
+./run eval-grasp: the same trials, ended once the mug is lifted (or after GRASP_STEPS) -> results/grasp-n<N_ACTION_STEPS>/<model>/.
 
 Usage: ./run eval [libero-0 libero-4 libero-4@10000 ...] [--jobs 2]   (default: MODELS; <model>@<step>: the checkpoint at that step)
+       ./run eval-grasp [libero-4 ...] [--jobs 2]
 (eval_watch.py: the same trials, live in the viewer)
 """
 import argparse
@@ -40,6 +42,7 @@ SEED = 0                # trial seeds derive from it (mug jitter, policy noise):
 MUG_JITTER = 0.01       # m, uniform +- around the spot
 N_ACTION_STEPS = 10     # actions run from each predicted chunk (50) before the policy looks again
 MAX_STEPS = 1200        # control steps (60 s; the longest demo is 958)
+GRASP_STEPS = 300       # control steps for eval-grasp (15 s; the demos hold the mug by step 96-153)
 LIFT_CM = 3.0           # the mug counts as lifted this far above where it stood
 TOPPLED_DEG = 45.0      # ... as knocked over tilted this far
 RELEASE_CM = 8.0        # ... as released with the gripper point this far from it
@@ -117,7 +120,7 @@ def film(e, caption):
     return np.hstack(imgs)
 
 
-def trial(env, model, plant, spot, seed, video=None, viewer=None):
+def trial(env, model, plant, spot, seed, video=None, viewer=None, grasp=False):
     """One episode: place the scene, let the policy act, measure where the water and the mug ended.
 
     env    -> env from scene(plant)
@@ -127,6 +130,7 @@ def trial(env, model, plant, spot, seed, video=None, viewer=None):
     seed   -> mug jitter and policy noise
     video  -> mp4 path to film the trial to, or None
     viewer -> MuJoCo passive viewer to show it in, or None
+    grasp  -> end once the mug is lifted or knocked over, within GRASP_STEPS
     returns dict of the trial's results (see the module docstring)
     """
     e = env.env
@@ -152,7 +156,7 @@ def trial(env, model, plant, spot, seed, video=None, viewer=None):
     lifted = handled = False  # handled: lifted or knocked over, so the mug resting means the robot is done with it
     rest = steps = 0
     t0, t_policy = time.time(), 0.0  # t_policy: cameras + policy, the rest is physics (+ filming)
-    while steps < MAX_STEPS:
+    while steps < (GRASP_STEPS if grasp else MAX_STEPS):
         if not queue:
             t1 = time.time()
             with lock():
@@ -176,7 +180,7 @@ def trial(env, model, plant, spot, seed, video=None, viewer=None):
         if video and steps % VIDEO_EVERY == 0:
             n = e.watering_stats()["target"]
             frames.append(film(e, [_cache["name"], task, f"spot {spot}: {n}/{DROPLET['count']} in plant"]))
-        if rest >= REST_S * CONTROL_HZ:
+        if rest >= REST_S * CONTROL_HZ or grasp and handled:
             break
 
     stats = e.watering_stats()  # pos, rot, released: as at the loop's last step
@@ -203,41 +207,46 @@ def trial_seed(plant, spot, t):
     return SEED + 1000 * PLANTS.index(plant) + 100 * spot + t
 
 
-def describe(r, plant):
+def describe(r, plant, grasp=False):
     """One line on a trial's result."""
+    if grasp:
+        return f"mug {'LIFTED' if r['lifted'] else 'not lifted'}, tilted {r['mug_tilt_deg']:.0f} deg ({r['steps']} steps, {r['seconds']:.0f} s)"
     return (f"{r['in_target']}/{DROPLET['count']} in the {plant} plant, {r['in_wrong']} in a wrong one, "
             f"mug {'placed' if r['placed'] else 'not placed'} -> {'SUCCESS' if r['success'] else 'fail'} "
             f"({r['steps']} steps, {r['seconds']:.0f} s)")
 
 
-def run_unit(unit, name):
+def run_unit(unit, name, grasp=False):
     """TRIALS trials of one plant x spot -> results/<model>/<unit>.json.
 
-    unit -> "<plant>-<spot>", e.g. "left-6"
-    name -> model name
+    unit  -> "<plant>-<spot>", e.g. "left-6"
+    name  -> model name
+    grasp -> grasp-only trials -> results/grasp-n<N_ACTION_STEPS>/<model>/<unit>.json
     returns {clip: unit, summary}
     """
     plant, spot = unit.split("-")[0], int(unit.split("-")[1])
-    out = RESULTS / name
+    out = (RESULTS / f"grasp-n{N_ACTION_STEPS}" if grasp else RESULTS) / name
     (out / "videos").mkdir(parents=True, exist_ok=True)
     torch.set_num_threads(1)  # parallel workers: each torch on every core would fight over the CPU
     model, env = load_model(name), scene(plant)
     trials = []
     for t in range(TRIALS):
         video = out / "videos" / f"{unit}.mp4" if t < VIDEO_TRIALS else None
-        r = trial(env, model, plant, spot, trial_seed(plant, spot, t), video)
+        r = trial(env, model, plant, spot, trial_seed(plant, spot, t), video, grasp=grasp)
         trials.append(r)
-        print(f"  {name} {unit} #{t}: {describe(r, plant)}", flush=True)
+        print(f"  {name} {unit} #{t}: {describe(r, plant, grasp)}", flush=True)
     (out / f"{unit}.json").write_text(json.dumps(dict(
         model=name, repo="@".join(filter(None, runs.repo(name))), plant=plant, spot=spot, spot_cm=SPOTS[spot],
-        trained_spot=spot in TRAINED_SPOTS, n_action_steps=N_ACTION_STEPS, max_steps=MAX_STEPS, trials=trials), indent=1))
-    return dict(clip=unit, summary=f"{sum(r['success'] for r in trials)}/{TRIALS}")
+        trained_spot=spot in TRAINED_SPOTS, n_action_steps=N_ACTION_STEPS, max_steps=GRASP_STEPS if grasp else MAX_STEPS,
+        trials=trials), indent=1))
+    return dict(clip=unit, summary=f"{sum(r['lifted' if grasp else 'success'] for r in trials)}/{TRIALS}")
 
 
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("models", nargs="*")
     p.add_argument("--jobs", type=int, default=2, help="units run in parallel, each with its own copy of the model")
+    p.add_argument("--grasp", action="store_true", help="grasp-only trials (passed by ./run eval-grasp)")
     args = p.parse_args()
     wanted = args.models or MODELS
     from huggingface_hub import file_exists
@@ -245,12 +254,17 @@ def main():
     models = [m for m in wanted if file_exists(runs.repo(m)[0], "model.safetensors", revision=runs.repo(m)[1])]
     if missing := [m for m in wanted if m not in models]:
         print(f"not on the Hub yet (skipped): {', '.join(missing)}")
+    out = RESULTS / f"grasp-n{N_ACTION_STEPS}" if args.grasp else RESULTS
     for name in models:
-        todo = [u for u in UNITS if not (RESULTS / name / f"{u}.json").exists()]
+        todo = [u for u in UNITS if not (out / name / f"{u}.json").exists()]
         print(f"\n=== {name}: {len(todo)} of {len(UNITS)} units to run, {TRIALS} trials each", flush=True)
-        for r in episodes.parallel_map(run_unit, todo, {"name": name}, args.jobs, name):
+        lifted = 0
+        for r in episodes.parallel_map(run_unit, todo, {"name": name, "grasp": args.grasp}, args.jobs, name):
             if "error" in r:
                 print(f"{r['clip']}: FAILED: {r['error']}")
+            else:
+                lifted += int(r["summary"].split("/")[0])
+        print(f"{name}: {lifted}/{len(todo) * TRIALS} {'lifted' if args.grasp else 'succeeded'} (units run now)")
     print(f"\nresults: {RESULTS.relative_to(Path.cwd())}/<model>/  (./run compare for tables and plots)")
 
 
