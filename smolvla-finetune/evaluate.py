@@ -35,7 +35,8 @@ SPOTS = {**{i + 1: tuple(xy) for i, xy in enumerate(sorted(episodes.SETUP["mug_s
          5: (-21.0, 24.0), 6: (-8.0, 16.0), 7: (4.0, 28.0), 8: (24.0, 18.0)}
 TRAINED_SPOTS = (1, 2, 3, 4)
 # models evaluated when ./run eval names none (<init>-<k>: README.md); one not on the Hub yet is skipped
-MODELS = ["libero-0", "libero-1", "libero-2", "libero-4", "base-1", "base-2", "base-4"]
+MODELS = ["libero-0", "libero-1", "libero-2", "libero-4", "base-1", "base-2", "base-4", "libero-4s", "base-4s",
+          "libero-4s-b64", "base-4s-b64"]
 UNITS = [f"{plant}-{spot}" for plant in PLANTS for spot in SPOTS]  # every plant x spot; or e.g. ["left-1", "right-6"]
 TRIALS = 7              # trials per plant x spot (24 x 7 = 168 per model)
 SEED = 0                # trial seeds derive from it (mug jitter, policy noise): the same for every model
