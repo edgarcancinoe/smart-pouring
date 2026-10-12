@@ -14,6 +14,7 @@ from huggingface_hub import hf_hub_download
 from huggingface_hub.errors import EntryNotFoundError, RepositoryNotFoundError
 
 import runs
+from sim.watering.assets import DROPLET
 from train import LOG_EVERY
 
 RESULTS = Path(__file__).parent / "results"
@@ -77,10 +78,10 @@ def main():
         wrong = sum(r["in_wrong"] > r["in_target"] for r in rows)
         lines.append(f"| {name} | {k} | {rate([r for r in rows if r['trained_spot']])} "
                      f"| {rate([r for r in rows if not r['trained_spot']])} | {rate(rows)} | {rate(rows, 'watered')} "
-                     f"| {rate(rows, 'placed')} | {rate(rows, 'lifted')} | {np.mean([r['in_target'] for r in rows]):.1f}/30 "
+                     f"| {rate(rows, 'placed')} | {rate(rows, 'lifted')} | {np.mean([r['in_target'] for r in rows]):.1f}/{DROPLET['count']} "
                      f"| {wrong}/{len(rows)} |")
     (RESULTS / "summary.md").write_text("# SmolVLA on the watering scene\n\n"
-        "Success = at least 15/30 droplets in the commanded plant and the mug put back upright within 3 cm of its "
+        f"Success = at least half of the {DROPLET['count']} droplets in the commanded plant and the mug put back upright within 3 cm of its "
         "start. Trained spots 1-4, new spots 5-8. Wrong plant = more droplets in another "
         "plant than in the commanded one.\n\n" + "\n".join(lines) + "\n")
     print("\n".join(lines))
@@ -121,7 +122,7 @@ def main():
         vals = np.array([np.mean([r[key] for r in data[n]]) for n in names])
         ax.bar(names, vals, bottom=bottom, color=DROPLET_COLORS[key], label=label, edgecolor="white", linewidth=2)
         bottom += vals
-    ax.set_ylabel("droplets (mean of 30)")
+    ax.set_ylabel(f"droplets (mean of {DROPLET['count']})")
     ax.legend(frameon=False, fontsize=9, bbox_to_anchor=(1, 1), loc="upper left")
     ax.spines[["top", "right"]].set_visible(False)
     fig.tight_layout()

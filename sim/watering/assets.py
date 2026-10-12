@@ -32,7 +32,7 @@ def _pot(diameter, height):
 
 POTS_DIMS = {s: _pot(SETUP["pots"]["diameter"][s] / 100, SETUP["pots"]["height"][s] / 100)
              for s in ("left", "middle", "right")}
-DROPLET = dict(radius=0.005, count=30, rgba="0.30 0.60 0.95 1")  # 30 fit below the rim of the scaled mug
+DROPLET = dict(radius=0.005, count=10, rgba="0.30 0.60 0.95 1")  # up to 30 fit below the rim; 10: physics 2.4x faster than 30
 
 COL = 'group="0" rgba="0 0 0 0" friction="1.0 0.005 0.0001"'
 # The mug's outer surface, where the fingers hold it: grippy, with torsional friction (condim 4) so the
