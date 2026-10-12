@@ -1,7 +1,8 @@
 """The models compared (<init>-<k>, see README.md) and which phone demos each one trains on."""
 from dataset import episodes
 
-DATASET = episodes.HUB_DATASET
+DATASET = "edgarcancinoe/water_pour"  # the demos with the mug exactly on its 4 measured spots
+SHIFTED = episodes.HUB_DATASET       # the same + each replayed with the mug shifted (robot_replay.py SHIFTS)
 
 # The two pretrained checkpoints every model starts from
 LIBERO  = "HuggingFaceVLA/smolvla_libero"   # pretrained on LIBERO: same Panda
@@ -11,6 +12,7 @@ BASE    = "lerobot/smolvla_base"             # pretrained on SO arms
 #   start -> checkpoint it starts from
 #   k     -> phone demos per plant x start spot it is fine-tuned on (0 = not fine-tuned)
 #   repo  -> Hugging Face repo holding it (./run train pushes there, ./run eval loads from there)
+#   data  -> dataset it trains on (default DATASET)
 MODELS = {
     "libero-0": dict(start=LIBERO,  k=0, repo=LIBERO),  # baseline: smolvla_libero as downloaded
     "libero-1": dict(start=LIBERO,  k=1, repo="edgarcancinoe/smolvla_water_libero-1"),
@@ -19,6 +21,7 @@ MODELS = {
     "base-1":   dict(start=BASE,    k=1, repo="edgarcancinoe/smolvla_water_base-1"),
     "base-2":   dict(start=BASE,    k=2, repo="edgarcancinoe/smolvla_water_base-2"),
     "base-4":   dict(start=BASE,    k=4, repo="edgarcancinoe/smolvla_water_base-4"),
+    "libero-4s": dict(start=LIBERO, k=4, repo="edgarcancinoe/smolvla_water_libero-4s", data=SHIFTED),
 }
 
 
@@ -44,11 +47,15 @@ def device():
 def pick(clips, k):
     """
     clips -> clip name of each dataset episode, in episode order (meta/clips.json)
-    k     -> demos per pair
+    k     -> recordings per pair; each comes with its shifted replays (A1-0~1, ...)
     """
-    pairs = {}
+    pairs, chosen = {}, []
     for i, clip in sorted(enumerate(clips), key=lambda ic: episodes.sort_key(ic[1])):
         p = episodes.parse(clip)
-        pairs.setdefault((p["plant"], p["position"]), []).append((i, clip))
-    chosen = sorted(ic for demos in pairs.values() for ic in demos[:k])
+        recs = pairs.setdefault((p["plant"], p["position"]), [])
+        if p["rep"] not in recs and len(recs) < k:
+            recs.append(p["rep"])
+        if p["rep"] in recs:
+            chosen.append((i, clip))
+    chosen.sort()
     return [i for i, _ in chosen], [c for _, c in chosen]

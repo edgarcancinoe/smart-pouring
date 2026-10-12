@@ -170,17 +170,18 @@ def prepare(clip):
                 spot_err=spot_err, side=side, max_tilt=max_tilt, mouth_err=mouth_err)
 
 
-def place_in_sim(prep, problem, settle_steps=200):
+def place_in_sim(prep, problem, settle_steps=200, shift=(0.0, 0.0)):
     """Put the sim mug on the clip's start spot (pots on their measured spots), let the droplets
     settle, and return the clip's path in sim world coordinates.
 
     prep        -> dict from prepare()
     problem     -> the LIBERO problem (env.env) of a watering scene
     settle_steps -> physics steps for the droplets to come to rest
+    shift        -> (2,) m added to the start spot; the whole path moves with it
     returns times (N,) s from 0, sim_pos (N, 3) m, sim_rot Rotation (N), sim_pos0 (3,) m (sim mug's start)
     """
     from sim.watering.bddl import MUG_STARTS, POTS
-    problem.set_layout(MUG_STARTS[prep["spot"]], POTS)
+    problem.set_layout(np.add(MUG_STARTS[prep["spot"]], shift), POTS)
     robot = problem.robots[0]
     q_arm = problem.sim.data.qpos[robot._ref_joint_pos_indexes].copy()
     for _ in range(settle_steps):

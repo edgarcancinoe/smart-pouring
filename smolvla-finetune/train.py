@@ -20,19 +20,20 @@ SAVE_EVERY = 10_000          # steps between local checkpoints (outputs/train/<m
 OUT = Path("outputs/train")
 
 
-def train(name, clips):
+def train(name):
     """Fine-tune one model on its demos, push it with its log and demo list.
 
-    name  -> model name, e.g. "libero-2"
-    clips -> clip name of each dataset episode, in episode order
+    name -> model name, e.g. "libero-2"
     """
     model = runs.MODELS[name]
     start, k, repo = model["start"], model["k"], model["repo"]
+    data = model.get("data", runs.DATASET)
 
     if HfApi().file_exists(repo, "demos.json"):  # uploaded last: the model is done
         print(f"{name}: already on the Hub")
         return
     
+    clips = json.loads(Path(hf_hub_download(data, "meta/clips.json", repo_type="dataset")).read_text())
     episodes, demos = runs.pick(clips, k)
     print(f"\n=== {name}: {start} + {len(episodes)} demos -> {repo}")
 
@@ -45,7 +46,7 @@ def train(name, clips):
            "--policy.push_to_hub=true",  # the checkpoint's own config may say otherwise
            f"--policy.device={runs.device()}",
            f"--policy.scheduler_decay_steps={STEPS}",  # decay over this run's length (default: 30k steps)
-           f"--dataset.repo_id={runs.DATASET}",
+           f"--dataset.repo_id={data}",
            f"--dataset.episodes={episodes}",
            "--dataset.video_backend=pyav",  # AV1 videos: PyAV bundles a decoder; torchcodec uses whatever FFmpeg is installed
            f"--rename_map={json.dumps(runs.CAMERA_NAMES[start])}",
@@ -73,10 +74,9 @@ def train(name, clips):
 
 
 def main():
-    clips = json.loads(Path(hf_hub_download(runs.DATASET, "meta/clips.json", repo_type="dataset")).read_text())
     OUT.mkdir(parents=True, exist_ok=True)
     for name in sys.argv[1:] or MODELS:
-        train(name, clips)
+        train(name)
 
 
 if __name__ == "__main__":

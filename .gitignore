@@ -11,4 +11,4 @@ outputs/
 dataset/data/
 
 sim/tools/
-smolvla-finetune/results/*/videos/
+smolvla-finetune/results/*

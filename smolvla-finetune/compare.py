@@ -1,20 +1,49 @@
-"""Every evaluated model side by side: results/summary.md, success_vs_k.png, droplets.png. See README.md.
+"""Every evaluated model side by side: results/summary.md, success_vs_k.png, droplets.png, losses.png. See README.md.
 
 Usage: ./run compare
 """
 import json
+import re
 from pathlib import Path
 
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
+from huggingface_hub import hf_hub_download
+from huggingface_hub.errors import EntryNotFoundError, RepositoryNotFoundError
 
 import runs
+from train import LOG_EVERY
 
 RESULTS = Path(__file__).parent / "results"
 COLORS = {runs.LIBERO: "#2a6fdb", runs.BASE: "#e07b20"}  # one hue per start checkpoint (blue / orange: colorblind-safe)
 DROPLET_COLORS = {"in_target": "#2a6fdb", "in_wrong": "#d6453d", "spilled": "#9aa0a6", "in_mug": "#e0b84a"}
+
+
+def losses():
+    """Training loss of every fine-tuned model, from the train.log on its Hub repo -> results/losses.png."""
+    fig, ax = plt.subplots(figsize=(6, 3.6))
+    for name, m in runs.MODELS.items():
+        if not m["k"]:
+            continue
+        try:
+            log = Path(hf_hub_download(m["repo"], "train.log")).read_text()
+        except (EntryNotFoundError, RepositoryNotFoundError):
+            continue  # not trained yet
+        loss = [float(x) for x in re.findall(r" loss:([\d.]+)", log)]  # one line per LOG_EVERY steps
+        ax.plot(np.arange(1, len(loss) + 1) * LOG_EVERY, loss, color=COLORS[m["start"]],
+                ls="-." if "data" in m else {1: ":", 2: "--", 4: "-"}[m["k"]], lw=1.5, label=name)
+    ax.set_xlabel("training step")
+    ax.set_ylabel("loss")
+    ax.set_yscale("log")
+    ax.legend(frameon=False, fontsize=9)
+    ax.grid(axis="y", color="#e5e5e5")
+    ax.spines[["top", "right"]].set_visible(False)
+    fig.tight_layout()
+    RESULTS.mkdir(exist_ok=True)
+    fig.savefig(RESULTS / "losses.png", dpi=150)
+    print(f"-> {RESULTS}/losses.png")
 
 
 def load():
@@ -35,6 +64,7 @@ def rate(rows, key="success"):
 
 
 def main():
+    losses()
     data = load()
     if not data:
         raise SystemExit(f"no results in {RESULTS}: ./run eval first")
@@ -61,9 +91,9 @@ def main():
         for start in COLORS:
             pts = []
             for name, rows in data.items():
-                if "@" in name:
-                    continue  # checkpoints: table only
-                model = runs.MODELS[name]
+                model = runs.MODELS.get(name, {})
+                if "@" in name or "data" in model:
+                    continue  # checkpoints and other datasets: table only
                 if model["start"] == start:
                     sub = [r for r in rows if r["trained_spot"] == trained]
                     pts.append((model["k"], np.mean([r["success"] for r in sub])))

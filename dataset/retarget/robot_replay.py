@@ -14,10 +14,14 @@ Success = water in the plant and the mug put back where the demonstration ended.
 Writes, in dataset/data/<group>/<clip>/: robot.json (result), robot_states.npz (sim state and action per
 control step: for ./run watch, ./run video and ./run export) and, if VIDEO, robot.mp4.
 
+Each clip also runs SHIFTS more times as <clip>~1, <clip>~2, ...: the mug (and the whole pour) shifted by up to
+SHIFT_CM, so the policy must find the mug in the image instead of memorizing four grasp spots.
+
 Usage: ./run robot [A1-0 ...] [--jobs 4]   (default: every tracked episode)
 """
 import argparse
 import json
+import zlib
 
 import numpy as np
 from scipy.spatial.transform import Rotation as R, Slerp
@@ -41,6 +45,8 @@ SAFE_HEIGHT = 0.20      # m above the mug for moves across the scene
 REACH_STEP = 0.012      # m per control step along the scripted lines
 SHOULDER_OFFSET = 0.08  # m beside the base, on the mug's side: the grip points at the mug from there
 MAX_STEP = np.array([0.05, 0.05, 0.05, 0.5, 0.5, 0.5])  # controller's range per step (m, rad): action +-1
+SHIFTS = 3              # extra runs per clip with the mug shifted (0: only the clip as recorded)
+SHIFT_CM = 3.0          # uniform +- per axis on the table
 PLACED_CM, PLACED_DEG = 3.0, 15.0  # the mug counts as put back within this of the demonstration's end pose
 
 
@@ -67,7 +73,7 @@ def action_to(obs, p_target, r_target, grip):
     return np.r_[np.clip(delta / MAX_STEP, -1, 1), grip], delta
 
 
-def choose_tilt(arm, prep, e, base_xy):
+def choose_tilt(arm, prep, e, base_xy, shift):
     """The flattest of TILTS from which an arm posture grabs this clip's mug and follows the whole pour with
     MIN_ROOM deg of joint room (geometry only, ~5 s per tilt); else the one with the most room.
 
@@ -75,9 +81,10 @@ def choose_tilt(arm, prep, e, base_xy):
     prep    -> dict from mug_path.prepare()
     e       -> the LIBERO problem (env.env); the mug is moved to the clip's start spot
     base_xy -> (2,) robot base position, m
+    shift   -> (2,) m the mug is moved from its spot
     returns tilt deg, q_grab (7,) joint angles rad at the grab
     """
-    times, mug_pos, mug_rot, mug0 = mp.place_in_sim(prep, e)  # the pour in sim coordinates; mug on its spot
+    times, mug_pos, mug_rot, mug0 = mp.place_in_sim(prep, e, shift=shift)  # the pour in sim coordinates; mug on its spot
     
     # mug poses along the pour, every PLAN_STEP_S of clip time
     samples     = np.arange(0, times[-1], PLAN_STEP_S)
@@ -118,7 +125,10 @@ def run(clip):
     clip -> clip name, e.g. "A1-0"
     returns robot.json dict: clip, plant, tilt deg, in_plant (%), watered / placed / success bools
     """
-    prep = mp.prepare(clip)
+    episodes.clip_dir(clip).mkdir(parents=True, exist_ok=True)  # shifted runs get their own folder
+    prep = mp.prepare(clip.split("~")[0])
+    # shifted runs: a fixed offset per name, so re-running gives the same demo
+    shift = np.random.default_rng(zlib.crc32(clip.encode())).uniform(-SHIFT_CM, SHIFT_CM, 2) / 100 if "~" in clip else (0, 0)
     
     # no camera observations in simulation. video is rendered afterwards from the saved states
     env = watering.make_env(prep["side"], hard_reset=False, initialization_noise=None, horizon=100000, ignore_done=True, use_camera_obs=False)
@@ -132,7 +142,7 @@ def run(clip):
     # We test samples along the planned path assuming different hand tilts. We start by lower inclination (flattest hand tilt)
     # and choose the first one that grabs the mug and performs whole pour.
     
-    tilt, _ = choose_tilt(arm, prep, e, base_xy)
+    tilt, _ = choose_tilt(arm, prep, e, base_xy, shift)
     
     # start pose: the same for every demo, as at evaluation
     q_ready = START_Q
@@ -145,7 +155,7 @@ def run(clip):
     e.robots[0].controller.update_initial_joints(q_ready)
 
     # mug on the clip's start spot; the pour in sim coordinates
-    times, sim_pos, sim_rot, mug0 = mp.place_in_sim(prep, e)
+    times, sim_pos, sim_rot, mug0 = mp.place_in_sim(prep, e, shift=shift)
     obs, *_ = env.step(np.r_[np.zeros(6), -1])  # one step with the gripper open, for a fresh observation
 
     # grab pointing at the mug from the shoulder on the mug's side, fingers left/right
@@ -276,7 +286,8 @@ def main():
     p.add_argument("clips", nargs="*")
     p.add_argument("--jobs", type=int, default=0, help="clips run in parallel (default: up to half the CPU cores)")
     args = p.parse_args()
-    for r in episodes.parallel_map(run, args.clips or episodes.tracked(), {}, args.jobs, "robot"):
+    clips = [f"{c}~{i}" if i else c for c in args.clips or episodes.tracked() for i in range(SHIFTS + 1)]
+    for r in episodes.parallel_map(run, clips, {}, args.jobs, "robot"):
         if "error" in r:  # crashed: record it as a failure
             (episodes.clip_dir(r["clip"]) / "robot.json").write_text(json.dumps(dict(r, success=False), indent=2))
             print(f"{r['clip']}: {r['error']}")
