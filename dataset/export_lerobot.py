@@ -74,7 +74,8 @@ def main():
     if root.exists():
         shutil.rmtree(root)
     ds = LeRobotDataset.create(f"local/{NAME}", fps=playback.load(keep[0])["control_hz"],
-                               features=FEATURES, root=root, robot_type="panda", use_videos=True)
+                               features=FEATURES, root=root, robot_type="panda", use_videos=True,
+                               streaming_encoding=True)  # encode frames as they come, no PNG round trip
     env = playback.scene()
     e = env.env
     frames = 0
