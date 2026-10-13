@@ -34,6 +34,8 @@ MODELS = {
     "libero-4s-dart": dict(start=LIBERO, k=4, repo="edgarcancinoe/smolvla_water_libero-4s-dart", data=DART),
     "libero-4s-dart-xl": dict(start=LIBERO, k=4, repo="edgarcancinoe/smolvla_water_libero-4s-dart-xl",
                               data="edgarcancinoe/water_pour_dart_xl"),  # 16 DART runs per recording
+    "base-4s-dart-xl":   dict(start=BASE, k=4, repo="edgarcancinoe/smolvla_water_base-4s-dart-xl",
+                              data="edgarcancinoe/water_pour_dart_xl"),
     # libero-4s, trained further on SHIFTED + the teacher's takeovers from its own rollouts (smolvla-recoveries/DAgger)
     "libero-4s-dagger1": dict(start="libero-4s", k=4, repo="edgarcancinoe/smolvla_water_libero-4s-dagger1",
                               data="edgarcancinoe/water_pour_dagger1", steps=8_000),
