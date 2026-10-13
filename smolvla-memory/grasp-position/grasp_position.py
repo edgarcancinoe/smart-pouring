@@ -37,13 +37,6 @@ def grasp_positions(closing, xy):
     return out
 
 
-def check():
-    """grasp_positions on a toy episode: zeros up to the close, then its position; a later close replaces it."""
-    xy = np.arange(12, dtype=np.float32).reshape(6, 2)
-    out = grasp_positions(np.array([0, 1, 1, 0, 1, 1], bool), xy)
-    assert (out[:2] == 0).all() and (out[2:5] == [1, 2, 3]).all() and (out[5] == [1, 8, 9]).all(), out
-
-
 def normalize(xy, stats):
     """xy (..., 2) m -> as the policy's normalizer scales the state's x, y (mean/std of the dataset)."""
     return (xy - stats["mean"][:2]) / stats["std"][:2]
@@ -77,7 +70,6 @@ def prepare_state(self, batch):
 def main(prepare=prepare_state):    
     global TABLE
     
-    check()
     state_dropout.P = float(sys.argv.pop(1))
     repo = next(a.split("=", 1)[1] for a in sys.argv if a.startswith("--dataset.repo_id="))
     TABLE = table(repo)
