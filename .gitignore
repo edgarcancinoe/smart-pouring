@@ -1,5 +1,7 @@
 .venv/
 .claude/
+.agents/
+skills-lock.json
 
 __pycache__/
 outputs/

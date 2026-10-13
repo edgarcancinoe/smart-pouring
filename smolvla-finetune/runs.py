@@ -41,7 +41,9 @@ MODELS = {
     # DART xl + state dropout: does dropout's gain at new spots add up with the best data?
     "libero-4s-dart-xl-sd": dict(start=LIBERO, k=4, repo="edgarcancinoe/smolvla_water_libero-4s-dart-xl-sd",
                                  data="edgarcancinoe/water_pour_dart_xl", dropout=0.3),
-    "base-4s-dart-xl-sd":   dict(start=BASE, k=4, repo="edgarcancinoe/smolvla_water_base-4s-dart-xl-sd",
+    "libero-4s-dart-xl-sd-b64": dict(start=LIBERO, k=4, repo="edgarcancinoe/smolvla_water_libero-4s-dart-xl-sd-b64",
+                                     data="edgarcancinoe/water_pour_dart_xl", dropout=0.3, batch=64),
+    "base-4s-dart-xl-sd":  dict(start=BASE, k=4, repo="edgarcancinoe/smolvla_water_base-4s-dart-xl-sd",
                                  data="edgarcancinoe/water_pour_dart_xl", dropout=0.3),
     # libero-4s, trained further on SHIFTED + the teacher's takeovers from its own rollouts (smolvla-recoveries/DAgger)
     "libero-4s-dagger1": dict(start="libero-4s", k=4, repo="edgarcancinoe/smolvla_water_libero-4s-dagger1",
