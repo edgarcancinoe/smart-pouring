@@ -58,7 +58,7 @@ def train(name):
            f"--batch_size={model.get('batch', BATCH)}",
            "--num_workers=16",  # video decoding feeds the GPU: with LeRobot's default 4 it sat idle 2/3 of the time
            f"--steps={steps}",
-           f"--save_freq={SAVE_EVERY}",
+           f"--save_freq={model.get('save', SAVE_EVERY)}",
            f"--log_freq={LOG_EVERY}",
            f"--output_dir={out}",
            f"--job_name={name}",  # run name on wandb
@@ -82,6 +82,10 @@ def train(name):
         if proc.wait():
             raise SystemExit(f"{name}: training failed, see {log}")
 
+    for ck in sorted((out / "checkpoints").glob("[0-9]*")):  # earlier checkpoints -> branch step-<n>, for ./run eval <model>@<n>
+        if int(ck.name) != steps:
+            hub.create_branch(repo, branch=f"step-{int(ck.name)}", exist_ok=True)
+            hub.upload_folder(folder_path=ck / "pretrained_model", repo_id=repo, revision=f"step-{int(ck.name)}")
     hub.upload_file(path_or_fileobj=log, path_in_repo="train.log", repo_id=repo)
     hub.upload_file(path_or_fileobj=json.dumps(demos, indent=1).encode(), path_in_repo="demos.json", repo_id=repo)
     print(f"{name}: done -> https://huggingface.co/{repo}")

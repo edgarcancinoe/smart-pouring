@@ -17,6 +17,7 @@ BASE    = "lerobot/smolvla_base"             # pretrained on SO arms
 #   batch -> samples per step (default train.BATCH)
 #   dropout -> share of training samples with the robot state zeroed (default train.STATE_DROPOUT)
 #   steps -> optimizer steps (default train.STEPS)
+#   save  -> steps between checkpoints, each also pushed to the branch step-<step> (default train.SAVE_EVERY)
 MODELS = {
     "libero-0": dict(start=LIBERO,  k=0, repo=LIBERO),  # baseline: smolvla_libero as downloaded
     "libero-1": dict(start=LIBERO,  k=1, repo="edgarcancinoe/smolvla_water_libero-1"),
@@ -42,7 +43,7 @@ MODELS = {
     "libero-4s-dart-xl-sd": dict(start=LIBERO, k=4, repo="edgarcancinoe/smolvla_water_libero-4s-dart-xl-sd",
                                  data="edgarcancinoe/water_pour_dart_xl", dropout=0.3),
     "libero-4s-dart-xl-sd-b64": dict(start=LIBERO, k=4, repo="edgarcancinoe/smolvla_water_libero-4s-dart-xl-sd-b64",
-                                     data="edgarcancinoe/water_pour_dart_xl", dropout=0.3, batch=64),
+                                     data="edgarcancinoe/water_pour_dart_xl", dropout=0.3, batch=64, steps=20_000, save=15_000),
     "base-4s-dart-xl-sd":  dict(start=BASE, k=4, repo="edgarcancinoe/smolvla_water_base-4s-dart-xl-sd",
                                  data="edgarcancinoe/water_pour_dart_xl", dropout=0.3),
     # libero-4s, trained further on SHIFTED + the teacher's takeovers from its own rollouts (smolvla-recoveries/DAgger)
