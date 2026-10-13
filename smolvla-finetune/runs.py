@@ -18,6 +18,7 @@ BASE    = "lerobot/smolvla_base"             # pretrained on SO arms
 #   dropout -> share of training samples with the robot state zeroed (default train.STATE_DROPOUT)
 #   steps -> optimizer steps (default train.STEPS)
 #   save  -> steps between checkpoints, each also pushed to the branch step-<step> (default train.SAVE_EVERY)
+#   script -> training script, called like state_dropout.py: <share> <lerobot args> (default state_dropout.py)
 MODELS = {
     "libero-0": dict(start=LIBERO,  k=0, repo=LIBERO),  # baseline: smolvla_libero as downloaded
     "libero-1": dict(start=LIBERO,  k=1, repo="edgarcancinoe/smolvla_water_libero-1"),
@@ -46,6 +47,14 @@ MODELS = {
                                      data="edgarcancinoe/water_pour_dart_xl", dropout=0.3, batch=64, steps=20_000, save=15_000),
     "base-4s-dart-xl-sd":  dict(start=BASE, k=4, repo="edgarcancinoe/smolvla_water_base-4s-dart-xl-sd",
                                  data="edgarcancinoe/water_pour_dart_xl", dropout=0.3),
+    # + the grasp position in the state: where the mug was picked up (smolvla-memory/grasp-position)
+    "libero-4s-dart-xl-sd-gp": dict(start=LIBERO, k=4, repo="edgarcancinoe/smolvla_water_libero-4s-dart-xl-sd-gp",
+                                    data="edgarcancinoe/water_pour_dart_xl", dropout=0.3,
+                                    script="smolvla-memory/grasp-position/grasp_position.py"),
+    # + where the gripper is relative to that grasp position (smolvla-memory/relative-actions)
+    "libero-4s-dart-xl-sd-rel": dict(start=LIBERO, k=4, repo="edgarcancinoe/smolvla_water_libero-4s-dart-xl-sd-rel",
+                                     data="edgarcancinoe/water_pour_dart_xl", dropout=0.3,
+                                     script="smolvla-memory/relative-actions/relative.py"),
     # libero-4s, trained further on SHIFTED + the teacher's takeovers from its own rollouts (smolvla-recoveries/DAgger)
     "libero-4s-dagger1": dict(start="libero-4s", k=4, repo="edgarcancinoe/smolvla_water_libero-4s-dagger1",
                               data="edgarcancinoe/water_pour_dagger1", steps=8_000),

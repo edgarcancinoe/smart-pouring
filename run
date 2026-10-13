@@ -26,6 +26,10 @@
 #   ./run dagger       [--jobs 8]           the policy reaches, the teacher takes over when it drifts: takeovers saved
 #   ./run dagger-export                     demos + takeovers -> DAgger dataset -> Hugging Face Hub (then ./run train libero-4s-dagger1)
 
+#  memory (smolvla-memory/): models train with ./run train <model>
+#   ./run grasp-pos-eval [model ...] [--jobs 8]   grasp-position models in the sim (as ./run eval)
+#   ./run relative-eval  [model ...] [--jobs 8]   relative-actions models in the sim (as ./run eval)
+
 cd "$(dirname "$0")" || exit 1
 export PYTHONPATH=. PYTHONWARNINGS=ignore PYTHONUNBUFFERED=1
 py=.venv/bin/python
@@ -43,7 +47,7 @@ case "$cmd" in
   export)    MUJOCO_GL=$gl exec $py dataset/export_lerobot.py "$@" ;;
   stats)     exec $py dataset/stats.py "$@" ;;
   upload)    exec $py dataset/upload.py "$@" ;;
-  train)     exec $py smolvla-finetune/train.py "$@" ;;
+  train)     PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position exec $py smolvla-finetune/train.py "$@" ;;
   eval)      MUJOCO_GL=$gl exec $py smolvla-finetune/evaluate.py "$@" ;;
   eval-grasp) MUJOCO_GL=$gl exec $py smolvla-finetune/evaluate.py --grasp "$@" ;;
   # cgl: the policy's cameras render offscreen while the viewer window runs (GLFW off the main thread crashes)
@@ -56,6 +60,8 @@ case "$cmd" in
   dagger)        PYTHONPATH=.:smolvla-finetune MUJOCO_GL=$gl exec $py smolvla-recoveries/DAgger/dagger.py "$@" ;;
   dagger-check)  PYTHONPATH=.:smolvla-finetune MUJOCO_GL=$gl exec $py smolvla-recoveries/DAgger/dagger.py --check "$@" ;;
   dagger-export) PYTHONPATH=.:smolvla-finetune MUJOCO_GL=$gl exec $py smolvla-recoveries/DAgger/dagger.py --export ;;
+  grasp-pos-eval) PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position MUJOCO_GL=$gl exec $py smolvla-memory/grasp-position/eval_grasp_position.py "$@" ;;
+  relative-eval)  PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions MUJOCO_GL=$gl exec $py smolvla-memory/relative-actions/eval_relative.py "$@" ;;
   *)         [ -f sim/tools/run ] && . sim/tools/run  # local-only commands, if present (gitignored)
-             sed -n '2,27p' "$0" | sed 's/^# //' ;;
+             sed -n '2,31p' "$0" | sed 's/^# //' ;;
 esac

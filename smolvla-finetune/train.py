@@ -45,7 +45,8 @@ def train(name):
     hub.create_repo(repo, exist_ok=True)  # no write access: fail now, not after hours of training
     out = OUT / name
     final = out / "checkpoints" / f"{steps:06d}" / "pretrained_model"  # LeRobot saves it before its push
-    cmd =[sys.executable, str(Path(__file__).parent / "state_dropout.py"), str(model.get("dropout", STATE_DROPOUT)),
+    script = model.get("script", Path(__file__).parent / "state_dropout.py")  # e.g. a smolvla-memory/ variant
+    cmd =[sys.executable, str(script), str(model.get("dropout", STATE_DROPOUT)),
            f"--policy.path={path}",
            f"--policy.repo_id={repo}",
            "--policy.push_to_hub=true",  # the checkpoint's own config may say otherwise
