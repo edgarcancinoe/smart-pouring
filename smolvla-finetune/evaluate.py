@@ -1,9 +1,10 @@
 """SmolVLA models drive the Panda in the watering scene: 3 plants x 8 start spots x TRIALS. See README.md.
 
-Writes results/<model>/<plant>-<spot>.json (one dict per trial) and videos/<plant>-<spot>.mp4.
+Writes results/<model>/<plant>-<spot>.json (one dict per trial) and videos/<plant>-<spot>.mp4; results/n<N>/<model>/ for N_ACTION_STEPS != 10.
 ./run eval-grasp: the same trials, ended once the mug is lifted (or after GRASP_STEPS) -> results/grasp-n<N_ACTION_STEPS>/<model>/.
 
 Usage: ./run eval [libero-0 libero-4 libero-4@10000 ...] [--jobs 2]   (default: MODELS; <model>@<step>: the checkpoint at that step)
+       N_ACTION_STEPS=5 ./run eval [...]
        ./run eval-grasp [libero-4 ...] [--jobs 2]
 (eval_watch.py: the same trials, live in the viewer)
 """
@@ -11,6 +12,7 @@ import argparse
 import contextlib
 import json
 import multiprocessing
+import os
 import threading
 import time
 from pathlib import Path
@@ -42,7 +44,8 @@ UNITS = [f"{plant}-{spot}" for plant in PLANTS for spot in SPOTS]  # every plant
 TRIALS = 5              # trials per plant x spot (24 x 5 = 120 per model; the first evals ran 7)
 SEED = 0                # trial seeds derive from it (mug jitter, policy noise): the same for every model
 MUG_JITTER = 0.01       # m, uniform +- around the spot
-N_ACTION_STEPS = 10     # actions run from each predicted chunk (50) before the policy looks again
+N_ACTION_STEPS = int(os.environ.get("N_ACTION_STEPS", 10))  # actions run from each predicted chunk (50) before the policy looks again;
+                        # env var so two evals with different N can run side by side (the spawned workers re-read it)
 MAX_STEPS = 1200        # control steps (60 s; the longest demo is 958)
 GRASP_STEPS = 300       # control steps for eval-grasp (15 s; the demos hold the mug by step 96-153)
 LIFT_CM = 3.0           # the mug counts as lifted this far above where it stood
@@ -55,7 +58,7 @@ VERBOSE = False         # also print every trial, and a clock line every PROGRES
 PROGRESS_EVERY = 200    # control steps between those clock lines
 VIDEO_EVERY = 2         # film every Nth control step
 VIDEO_SIZE = 256        # px per camera panel
-RESULTS = Path(__file__).parent / "results"
+RESULTS = Path(__file__).parent / "results" / ("" if N_ACTION_STEPS == 10 else f"n{N_ACTION_STEPS}")  # n10: the main results
 OPEN = np.r_[np.zeros(6), -1.0]  # no motion, gripper open
 
 _cache = {}  # per process: the loaded model and one env per plant
