@@ -13,11 +13,11 @@ from huggingface_hub import HfApi, hf_hub_download
 import runs
 
 MODELS  = ["libero-4", "libero-2", "libero-1", "base-4", "base-2", "base-1"]  # to train, in order (README.md)
-STEPS   = 25_000              # optimizer steps per model
+STEPS   = 20_000              # optimizer steps per model
 BATCH   = 32                  # samples per step
 STATE_DROPOUT = 0.0           # share of training samples with the robot state zeroed (state_dropout.py)
 LOG_EVERY = 100             # steps between the loss lines in the log
-SAVE_EVERY = 20_000          # steps between local checkpoints (outputs/train/<model>/checkpoints); LeRobot also saves the last step: 20k + 25k
+SAVE_EVERY = 15_000          # steps between local checkpoints (outputs/train/<model>/checkpoints)
 WANDB_PROJECT = "smart-pouring"  # live loss curves at wandb.ai/<you>/smart-pouring
 OUT = Path("outputs/train")
 
