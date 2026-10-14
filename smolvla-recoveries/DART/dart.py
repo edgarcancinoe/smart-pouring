@@ -20,6 +20,7 @@ RUNS = 32           # noisy replays per recording (<clip>~d1 ... ~d32), each wit
 NOISE_CM = 1.5      # std of the push added to each step's position command, cm
 NOISE_DEG = 3.0     # ... to its rotation command, deg
 PHASES = ("reach", "follow")  # pushed: the way to the mug and the carry, pour and put-back (xl: reach only, 1 cm, 2 deg, 16 runs)
+FOLLOW_SCALE = 0.4  # follow pushes are this share of the reach's: at full size the held mug slipped out (10/32 succeeded)
 RHO = 0.9           # push correlation from step to step (~0.5 s at 20 Hz): slow drifts, like a policy's errors
 # datasets --export makes -> DART runs per recording each takes (~d1 ... ~d<n>), in dataset/data/lerobot/ and on the Hub
 EXPORTS = {"water_pour_dart_full-xl": 16, "water_pour_dart_full-xxl": RUNS}
@@ -38,7 +39,8 @@ def perturb(action, phase, steps):
     if phase not in PHASES or steps != 1:  # the final line-up, the grasp and the release stay clean: no demo closes the gripper off-centre
         return action
     push = _state["push"] = RHO * _state["push"] + np.sqrt(1 - RHO ** 2) * _state["rng"].normal(0, SIGMA)
-    return np.r_[np.clip(action[:6] + push, -1, 1), action[6]]
+    scale = FOLLOW_SCALE if phase == "follow" else 1.0
+    return np.r_[np.clip(action[:6] + scale * push, -1, 1), action[6]]
 
 
 robot_replay.perturb = perturb  # at import, so the spawned workers get it too
