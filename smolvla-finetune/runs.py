@@ -51,10 +51,18 @@ MODELS = {
     "libero-4s-dart-xl-sd-gp": dict(start=LIBERO, k=4, repo="edgarcancinoe/smolvla_water_libero-4s-dart-xl-sd-gp",
                                     data="edgarcancinoe/water_pour_dart_xl", dropout=0.3,
                                     script="smolvla-memory/grasp-position/grasp_position.py"),
+    # the same, retrained once the memory waited for the fingers to stop on the mug (gp: set when closing began)
+    "libero-4s-dart-xl-sd-gp2": dict(start=LIBERO, k=4, repo="edgarcancinoe/smolvla_water_libero-4s-dart-xl-sd-gp2",
+                                     data="edgarcancinoe/water_pour_dart_xl", dropout=0.3,
+                                     script="smolvla-memory/grasp-position/grasp_position.py"),
     # + where the gripper is relative to that grasp position (smolvla-memory/relative-actions)
     "libero-4s-dart-xl-sd-rel": dict(start=LIBERO, k=4, repo="edgarcancinoe/smolvla_water_libero-4s-dart-xl-sd-rel",
                                      data="edgarcancinoe/water_pour_dart_xl", dropout=0.3,
                                      script="smolvla-memory/relative-actions/relative.py"),
+    # + the VLM's keys and values of the first agentview frame, attended to all episode (smolvla-memory/VLM-cache)
+    "libero-4s-dart-xl-sd-mem": dict(start=LIBERO, k=4, repo="edgarcancinoe/smolvla_water_libero-4s-dart-xl-sd-mem",
+                                     data="edgarcancinoe/water_pour_dart_xl", dropout=0.3,
+                                     script="smolvla-memory/VLM-cache/memory.py"),
     # libero-4s, trained further on SHIFTED + the teacher's takeovers from its own rollouts (smolvla-recoveries/DAgger)
     "libero-4s-dagger1": dict(start="libero-4s", k=4, repo="edgarcancinoe/smolvla_water_libero-4s-dagger1",
                               data="edgarcancinoe/water_pour_dagger1", steps=8_000),

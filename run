@@ -29,6 +29,7 @@
 #  memory (smolvla-memory/): models train with ./run train <model>
 #   ./run grasp-pos-eval [model ...] [--jobs 8]   grasp-position models in the sim (as ./run eval)
 #   ./run relative-eval  [model ...] [--jobs 8]   relative-actions models in the sim (as ./run eval)
+#   ./run memory-eval    [model ...] [--jobs 8]   VLM-cache memory models in the sim (as ./run eval)
 
 cd "$(dirname "$0")" || exit 1
 export PYTHONPATH=. PYTHONWARNINGS=ignore PYTHONUNBUFFERED=1
@@ -62,6 +63,7 @@ case "$cmd" in
   dagger-export) PYTHONPATH=.:smolvla-finetune MUJOCO_GL=$gl exec $py smolvla-recoveries/DAgger/dagger.py --export ;;
   grasp-pos-eval) PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position MUJOCO_GL=$gl exec $py smolvla-memory/grasp-position/eval_grasp_position.py "$@" ;;
   relative-eval)  PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions MUJOCO_GL=$gl exec $py smolvla-memory/relative-actions/eval_relative.py "$@" ;;
+  memory-eval)    PYTHONPATH=.:smolvla-finetune:smolvla-memory/VLM-cache MUJOCO_GL=$gl exec $py smolvla-memory/VLM-cache/eval_memory.py "$@" ;;
   *)         [ -f sim/tools/run ] && . sim/tools/run  # local-only commands, if present (gitignored)
-             sed -n '2,31p' "$0" | sed 's/^# //' ;;
+             sed -n '2,32p' "$0" | sed 's/^# //' ;;
 esac

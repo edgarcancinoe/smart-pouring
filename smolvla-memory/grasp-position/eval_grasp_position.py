@@ -1,5 +1,5 @@
 """./run eval for models trained with grasp_position.py: the same trials, with the grasp slots filled as in training
-(the gripper's x, y when the policy last started closing it). Results in smolvla-finetune/results/<model>/.
+(the gripper's x, y when its fingers last stopped on something while closing: grasp_position.held). Results in smolvla-finetune/results/<model>/.
 
 Usage: ./run grasp-pos-eval [libero-4s-dart-xl-sd-gp ...] [--jobs 8]
 """
@@ -15,7 +15,7 @@ SCRIPTS = ["smolvla-memory/grasp-position/grasp_position.py"]  # training script
 BLANK = False  # ablation: keep the grasp slots at zero all trial (does the policy use them?)
 
 _reset, _scene, _load_model = ev.reset, ev.scene, ev.load_model
-_last = {"closing": False, "obs": None, "stats": None}  # this process's running trial
+_last = {"held": False, "closing": False, "width": 0.0, "start": 0.0, "obs": None, "stats": None}  # this process's running trial
 
 
 def load_model(name):
@@ -28,12 +28,16 @@ def load_model(name):
 
 
 def step(env, action):
-    """env.step, noting the gripper's x, y when this action starts closing it (the same rule as in training)."""
-    closing = action[6] > 0
-    if closing and not _last["closing"] and not BLANK:
+    """env.step, noting the gripper's x, y when its fingers stop on something while closing (the same rule as in training)."""
+    q = _last["obs"]["robot0_gripper_qpos"]
+    width, closing = float(q[0] - q[1]), action[6] > 0
+    if closing and not _last["closing"]:
+        _last["start"] = width
+    now = gp.held(closing, width, _last["width"], _last["start"])
+    if now and not _last["held"] and not BLANK:
         xy = gp.normalize(_last["obs"]["robot0_eef_pos"][:2], _last["stats"])
         gp.CURRENT = torch.tensor([1, *xy], dtype=torch.float32)
-    _last["closing"] = closing
+    _last.update(held=now, closing=closing, width=width)
     out = env._unwrapped_step(action)
     _last["obs"] = out[0]
     return out
@@ -52,7 +56,8 @@ def reset(env, spot, rng, jitter=ev.MUG_JITTER):
     """evaluate.reset, then empty grasp slots: a new trial."""
     obs = _reset(env, spot, rng, jitter)
     gp.CURRENT = torch.zeros(3)
-    _last.update(closing=False, obs=obs)
+    q = obs["robot0_gripper_qpos"]
+    _last.update(held=False, closing=False, width=float(q[0] - q[1]), start=float(q[0] - q[1]), obs=obs)
     return obs
 
 
