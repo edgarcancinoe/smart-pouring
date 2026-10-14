@@ -59,6 +59,23 @@ MODELS = {
     "libero-4s-dart-xl-sd-rel": dict(start=LIBERO, k=4, repo="edgarcancinoe/smolvla_water_libero-4s-dart-xl-sd-rel",
                                      data="edgarcancinoe/water_pour_dart_xl", dropout=0.3,
                                      script="smolvla-memory/relative-actions/relative.py"),
+    "libero-4s-dart-xl-sd-rel-b64": dict(start=LIBERO, k=4, repo="edgarcancinoe/smolvla_water_libero-4s-dart-xl-sd-rel-b64",
+                                         data="edgarcancinoe/water_pour_dart_xl", dropout=0.3, batch=64,
+                                         script="smolvla-memory/relative-actions/relative.py"),
+    # rel on DART full: pushes on the carry, pour and put-back too (not only the reach), 1.5x the noise;
+    # full-xl: 16 runs per recording (as xl), full-xxl: 32
+    "libero-4s-dart-full-xl-sd-rel": dict(start=LIBERO, k=4, repo="edgarcancinoe/smolvla_water_libero-4s-dart-full-xl-sd-rel",
+                                          data="edgarcancinoe/water_pour_dart_full-xl", dropout=0.3,
+                                          script="smolvla-memory/relative-actions/relative.py"),
+    "libero-4s-dart-full-xl-sd-rel-b64": dict(start=LIBERO, k=4, repo="edgarcancinoe/smolvla_water_libero-4s-dart-full-xl-sd-rel-b64",
+                                              data="edgarcancinoe/water_pour_dart_full-xl", dropout=0.3, batch=64,
+                                              script="smolvla-memory/relative-actions/relative.py"),
+    "libero-4s-dart-full-xxl-sd-rel": dict(start=LIBERO, k=4, repo="edgarcancinoe/smolvla_water_libero-4s-dart-full-xxl-sd-rel",
+                                           data="edgarcancinoe/water_pour_dart_full-xxl", dropout=0.3,
+                                           script="smolvla-memory/relative-actions/relative.py"),
+    "libero-4s-dart-full-xxl-sd-rel-b64": dict(start=LIBERO, k=4, repo="edgarcancinoe/smolvla_water_libero-4s-dart-full-xxl-sd-rel-b64",
+                                               data="edgarcancinoe/water_pour_dart_full-xxl", dropout=0.3, batch=64,
+                                               script="smolvla-memory/relative-actions/relative.py"),
     # + the VLM's keys and values of the first agentview frame, attended to all episode (smolvla-memory/VLM-cache)
     "libero-4s-dart-xl-sd-mem": dict(start=LIBERO, k=4, repo="edgarcancinoe/smolvla_water_libero-4s-dart-xl-sd-mem",
                                      data="edgarcancinoe/water_pour_dart_xl", dropout=0.3,

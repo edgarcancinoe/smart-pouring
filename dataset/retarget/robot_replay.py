@@ -255,7 +255,7 @@ def run(clip):
         e.set_ghost("ghost_mug", [np.interp(t_k, times, sim_pos[:, j]) for j in range(3)], wxyz(slerp(t_k)))
         e.set_ghost("ghost_grip", p_t, wxyz(r_t))
         a, _ = action_to(obs, p_aim, r_aim, 1)
-        obs, *_ = env.step(a)
+        obs, *_ = env.step(perturb(a, "follow", 1))
         rec.add(a, "follow")
 
     # --- release: open, slide back out, lift, return to the start pose
