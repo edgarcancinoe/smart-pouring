@@ -2,9 +2,9 @@
 
 The VLM tokens of the episode's first agentview frame go in front of the multimodal prefix.
 
-- Prefix can read these memories fro each step t > 0
+- Prefix can read these memories in every step 
 - Action expert has access to the memory-enriched prefix and also the memory itself to attend to
-- Memory tokens are fixed in every chunk and step
+- Memory tokens are fixed in every chunk and step. Eval computes them once per trial and caches them.
 
 The VLM is frozen (`train_expert_only`), so the expert learns to read the memory.
 
