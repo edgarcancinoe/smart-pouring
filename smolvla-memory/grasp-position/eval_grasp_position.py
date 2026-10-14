@@ -29,6 +29,10 @@ def load_model(name):
 
 def step(env, action):
     """env.step, noting the gripper's x, y when its fingers stop on something while closing (the same rule as in training)."""
+    if _last["obs"] is None:  # evaluate.reset's own open-gripper step, before this trial's first observation
+        out = env._unwrapped_step(action)
+        _last["obs"] = out[0]
+        return out
     q = _last["obs"]["robot0_gripper_qpos"]
     width, closing = float(q[0] - q[1]), action[6] > 0
     if closing and not _last["closing"]:
