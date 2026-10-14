@@ -30,6 +30,7 @@
 #   ./run grasp-pos-eval [model ...] [--jobs 8]   grasp-position models in the sim (as ./run eval)
 #   ./run relative-eval  [model ...] [--jobs 8]   relative-actions models in the sim (as ./run eval)
 #   ./run memory-eval    [model ...] [--jobs 8]   VLM-cache memory models in the sim (as ./run eval)
+#   ./run isolated-eval  [model ...] [--jobs 8]   isolated VLM-cache memory models in the sim (as ./run eval)
 
 cd "$(dirname "$0")" || exit 1
 export PYTHONPATH=. PYTHONWARNINGS=ignore PYTHONUNBUFFERED=1
@@ -48,7 +49,7 @@ case "$cmd" in
   export)    MUJOCO_GL=$gl exec $py dataset/export_lerobot.py "$@" ;;
   stats)     exec $py dataset/stats.py "$@" ;;
   upload)    exec $py dataset/upload.py "$@" ;;
-  train)     PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position exec $py smolvla-finetune/train.py "$@" ;;
+  train)     PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/VLM-cache exec $py smolvla-finetune/train.py "$@" ;;
   eval)      MUJOCO_GL=$gl exec $py smolvla-finetune/evaluate.py "$@" ;;
   eval-grasp) MUJOCO_GL=$gl exec $py smolvla-finetune/evaluate.py --grasp "$@" ;;
   # cgl: the policy's cameras render offscreen while the viewer window runs (GLFW off the main thread crashes)
@@ -64,6 +65,7 @@ case "$cmd" in
   grasp-pos-eval) PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position MUJOCO_GL=$gl exec $py smolvla-memory/grasp-position/eval_grasp_position.py "$@" ;;
   relative-eval)  PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions MUJOCO_GL=$gl exec $py smolvla-memory/relative-actions/eval_relative.py "$@" ;;
   memory-eval)    PYTHONPATH=.:smolvla-finetune:smolvla-memory/VLM-cache MUJOCO_GL=$gl exec $py smolvla-memory/VLM-cache/eval_memory.py "$@" ;;
+  isolated-eval)  PYTHONPATH=.:smolvla-finetune:smolvla-memory/VLM-cache:smolvla-memory/VLM-cache-isolated MUJOCO_GL=$gl exec $py smolvla-memory/VLM-cache-isolated/eval_isolated.py "$@" ;;
   *)         [ -f sim/tools/run ] && . sim/tools/run  # local-only commands, if present (gitignored)
-             sed -n '2,32p' "$0" | sed 's/^# //' ;;
+             sed -n '2,33p' "$0" | sed 's/^# //' ;;
 esac

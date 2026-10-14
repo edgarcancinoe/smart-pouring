@@ -1,0 +1,199 @@
+<title>SmolVLA Memory Architecture</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Schibsted+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: diagram-first, one figure per stage, captions of one line; token colours = memory / now / state / expert */
+:root {
+  --bg: #f5f6f8; --surface: #ffffff; --fg: #151922; --muted: #5a6274; --line: #d9dde5; --off: #eceef2;
+  --mem: #c06a12; --mem-soft: #f8e7d2;
+  --now: #2b56c9; --now-soft: #dfe7fb;
+  --state: #11806a; --state-soft: #d5efe8;
+  --act: #6a4cc2; --act-soft: #e6e0f8;
+  --display: "Bricolage Grotesque", "Schibsted Grotesk", system-ui, sans-serif;
+  --body: "Schibsted Grotesk", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #11141a; --surface: #181c24; --fg: #e7eaf0; --muted: #9aa3b5; --line: #2c3240; --off: #1f2430;
+    --mem: #e89a4a; --mem-soft: #3a2a17; --now: #7d9cf0; --now-soft: #1d2741;
+    --state: #4cc3a6; --state-soft: #15302a; --act: #a990f0; --act-soft: #2a2242; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #11141a; --surface: #181c24; --fg: #e7eaf0; --muted: #9aa3b5; --line: #2c3240; --off: #1f2430;
+  --mem: #e89a4a; --mem-soft: #3a2a17; --now: #7d9cf0; --now-soft: #1d2741;
+  --state: #4cc3a6; --state-soft: #15302a; --act: #a990f0; --act-soft: #2a2242; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--fg); font: 15px/1.55 var(--body); }
+.wrap { max-width: 960px; margin: 0 auto; padding-inline: 20px; padding-block: 40px 72px; display: grid; gap: 44px; }
+h1, h2 { font-family: var(--display); margin: 0; line-height: 1.15; text-wrap: balance; }
+h1 { font-size: clamp(1.8rem, 4.5vw, 2.5rem); letter-spacing: -0.02em; }
+h2 { font-size: 1.25rem; }
+p { margin: 0; }
+section { display: grid; gap: 12px; }
+.tag { font: 500 0.72rem/1 var(--mono); text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+figure { margin: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 18px; display: grid; gap: 10px; min-width: 0; }
+figcaption { font-size: 0.88rem; color: var(--muted); }
+.scroll { overflow-x: auto; }
+svg text { font-family: var(--body); }
+svg .t { fill: var(--fg); } svg .m { fill: var(--muted); } svg .mono { font-family: var(--mono); }
+table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
+th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font: 500 0.72rem/1.3 var(--mono); text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+code { font-family: var(--mono); font-size: 0.85em; }
+</style>
+
+<div class="wrap">
+
+<header style="display:grid;gap:10px">
+  <span class="tag">smolvla-memory / VLM-cache</span>
+  <h1>SmolVLA with a start-frame memory</h1>
+  <p style="color:var(--muted)">The episode's first agentview frame goes in front of the prefix. Same weights, same VLM, one more block of tokens.</p>
+</header>
+
+<section>
+  <span class="tag">1 · Prefix: before and after</span>
+  <figure>
+    <div class="scroll">
+    <svg viewBox="0 0 920 300" width="920" style="max-width:100%;height:auto;min-width:700px" role="img" aria-label="Normal prefix: agentview, wrist, command, state into the VLM, keys and values P into the expert. With memory: start agentview tokens M first, then the same prefix; keys and values M and P into the expert.">
+      <defs><marker id="ar" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M2 1L8 5L2 9" fill="none" stroke="var(--muted)" stroke-width="1.6"/></marker></defs>
+      <text x="20" y="62" font-size="13" font-weight="600" class="t">SmolVLA</text>
+      <text x="20" y="202" font-size="13" font-weight="600" class="t">+ memory</text>
+
+      <!-- normal row -->
+      <g font-size="11" text-anchor="middle">
+        <rect x="214" y="42" width="90" height="34" rx="4" fill="var(--now-soft)" stroke="var(--now)"/><text x="259" y="63" fill="var(--now)">agentview 64</text>
+        <rect x="308" y="42" width="90" height="34" rx="4" fill="var(--now-soft)" stroke="var(--now)"/><text x="353" y="63" fill="var(--now)">wrist 64</text>
+        <rect x="402" y="42" width="40" height="34" rx="4" fill="var(--now-soft)" stroke="var(--now)"/><text x="422" y="63" fill="var(--now)">cmd</text>
+        <rect x="446" y="42" width="30" height="34" rx="4" fill="var(--state-soft)" stroke="var(--state)"/><text x="461" y="63" fill="var(--state)">S</text>
+      </g>
+      <g font-size="10" class="m mono" text-anchor="middle"><text x="328" y="92">block 0</text><text x="461" y="92">1</text></g>
+
+      <!-- memory row -->
+      <g font-size="11" text-anchor="middle">
+        <rect x="120" y="182" width="90" height="34" rx="4" fill="var(--mem-soft)" stroke="var(--mem)"/><text x="165" y="203" fill="var(--mem)" font-weight="600">M · start 64</text>
+        <rect x="214" y="182" width="90" height="34" rx="4" fill="var(--now-soft)" stroke="var(--now)"/><text x="259" y="203" fill="var(--now)">agentview 64</text>
+        <rect x="308" y="182" width="90" height="34" rx="4" fill="var(--now-soft)" stroke="var(--now)"/><text x="353" y="203" fill="var(--now)">wrist 64</text>
+        <rect x="402" y="182" width="40" height="34" rx="4" fill="var(--now-soft)" stroke="var(--now)"/><text x="422" y="203" fill="var(--now)">cmd</text>
+        <rect x="446" y="182" width="30" height="34" rx="4" fill="var(--state-soft)" stroke="var(--state)"/><text x="461" y="203" fill="var(--state)">S</text>
+      </g>
+      <g font-size="10" class="m mono" text-anchor="middle"><text x="165" y="232">block 0</text><text x="328" y="232">block 1</text><text x="461" y="232">2</text></g>
+      <g font-size="10" class="m" text-anchor="middle"><text x="165" y="250">frame at t = 0</text><text x="345" y="250">frame now</text></g>
+      <path d="M214 176 L214 168" stroke="var(--mem)"/><text x="218" y="166" font-size="10" fill="var(--mem)">flag = 1 here</text>
+
+      <!-- shared right side -->
+      <g font-size="12" text-anchor="middle">
+        <rect x="520" y="36" width="120" height="46" rx="5" fill="var(--off)" stroke="var(--line)"/><text x="580" y="56" class="t" font-weight="600">VLM</text><text x="580" y="72" class="m" font-size="10">32 layers, frozen</text>
+        <rect x="670" y="36" width="90" height="46" rx="5" fill="var(--surface)" stroke="var(--now)"/><text x="715" y="64" fill="var(--now)" font-weight="600">Pᵢ</text>
+        <rect x="790" y="36" width="110" height="46" rx="5" fill="var(--act-soft)" stroke="var(--act)"/><text x="845" y="56" fill="var(--act)" font-weight="600">expert</text><text x="845" y="72" fill="var(--act)" font-size="10">h reads Pᵢ</text>
+
+        <rect x="520" y="176" width="120" height="46" rx="5" fill="var(--off)" stroke="var(--line)"/><text x="580" y="196" class="t" font-weight="600">VLM</text><text x="580" y="212" class="m" font-size="10">same weights</text>
+        <rect x="670" y="176" width="44" height="46" rx="5" fill="var(--mem-soft)" stroke="var(--mem)"/><text x="692" y="204" fill="var(--mem)" font-weight="600">Mᵢ</text>
+        <rect x="716" y="176" width="44" height="46" rx="5" fill="var(--surface)" stroke="var(--now)"/><text x="738" y="204" fill="var(--now)" font-weight="600">Pᵢ</text>
+        <rect x="790" y="176" width="110" height="46" rx="5" fill="var(--act-soft)" stroke="var(--act)"/><text x="845" y="196" fill="var(--act)" font-weight="600">expert</text><text x="845" y="212" fill="var(--act)" font-size="10">h reads Mᵢ, Pᵢ</text>
+      </g>
+      <g stroke="var(--muted)" fill="none">
+        <line x1="480" y1="59" x2="516" y2="59" marker-end="url(#ar)"/><line x1="640" y1="59" x2="666" y2="59" marker-end="url(#ar)"/><line x1="760" y1="59" x2="786" y2="59" marker-end="url(#ar)"/>
+        <line x1="480" y1="199" x2="516" y2="199" marker-end="url(#ar)"/><line x1="640" y1="199" x2="666" y2="199" marker-end="url(#ar)"/><line x1="760" y1="199" x2="786" y2="199" marker-end="url(#ar)"/>
+      </g>
+      <text x="715" y="248" font-size="10" text-anchor="middle" class="m">keys + values, every layer i</text>
+      <line x1="20" y1="130" x2="900" y2="130" stroke="var(--line)"/>
+    </svg>
+    </div>
+    <figcaption>M = the start frame's agentview through the same SigLIP + connector as the cameras. The flag on the first "now" token shifts the present to block 1.</figcaption>
+  </figure>
+</section>
+
+<section>
+  <span class="tag">2 · Who reads whom</span>
+  <figure>
+    <div class="scroll">
+    <svg viewBox="0 0 560 300" width="560" style="max-width:100%;height:auto;min-width:420px" role="img" aria-label="Mask: memory reads memory. Now reads memory and now. State reads memory, now, state. Expert tokens read memory, now, state and earlier expert tokens.">
+      <g font-size="12" text-anchor="middle" class="m"><text x="190" y="22">M</text><text x="290" y="22">now</text><text x="370" y="22">S</text><text x="460" y="22">h</text></g>
+      <g font-size="12" text-anchor="end" class="m"><text x="128" y="78">M</text><text x="128" y="158">now</text><text x="128" y="218">S</text><text x="128" y="270">h</text></g>
+      <rect x="140" y="35" width="100" height="80" fill="var(--mem)" opacity="0.85"/>
+      <rect x="240" y="35" width="100" height="80" fill="var(--off)"/><rect x="340" y="35" width="60" height="80" fill="var(--off)"/><rect x="400" y="35" width="120" height="80" fill="var(--off)"/>
+      <rect x="140" y="115" width="100" height="80" fill="var(--now)" opacity="0.55"/><rect x="240" y="115" width="100" height="80" fill="var(--now)" opacity="0.85"/>
+      <rect x="340" y="115" width="60" height="80" fill="var(--off)"/><rect x="400" y="115" width="120" height="80" fill="var(--off)"/>
+      <rect x="140" y="195" width="100" height="40" fill="var(--state)" opacity="0.55"/><rect x="240" y="195" width="100" height="40" fill="var(--state)" opacity="0.55"/>
+      <rect x="340" y="195" width="60" height="40" fill="var(--state)" opacity="0.85"/><rect x="400" y="195" width="120" height="40" fill="var(--off)"/>
+      <rect x="140" y="235" width="100" height="50" fill="var(--act)" opacity="0.55"/><rect x="240" y="235" width="100" height="50" fill="var(--act)" opacity="0.55"/>
+      <rect x="340" y="235" width="60" height="50" fill="var(--act)" opacity="0.55"/><rect x="400" y="235" width="120" height="50" fill="var(--off)"/>
+      <polygon points="400,235 400,285 520,285" fill="var(--act)" opacity="0.85"/>
+      <g stroke="var(--bg)" stroke-width="2"><line x1="240" y1="35" x2="240" y2="285"/><line x1="340" y1="35" x2="340" y2="285"/><line x1="400" y1="35" x2="400" y2="285"/>
+        <line x1="140" y1="115" x2="520" y2="115"/><line x1="140" y1="195" x2="520" y2="195"/><line x1="140" y1="235" x2="520" y2="235"/></g>
+      <rect x="140" y="35" width="380" height="250" fill="none" stroke="var(--line)"/>
+    </svg>
+    </div>
+    <figcaption>Row reads column. M's row reads only M, so Mᵢ is the same in every chunk. h reads h only in even layers.</figcaption>
+  </figure>
+</section>
+
+<section>
+  <span class="tag">3 · The VLM pass: training vs eval</span>
+  <figure>
+    <div class="scroll">
+    <svg viewBox="0 0 920 420" width="920" style="max-width:100%;height:auto;min-width:700px" role="img" aria-label="Training: memory and now in one VLM pass with the block mask, giving M and P keys and values. Eval: M alone through the VLM at the first chunk, kept; each chunk runs only now on top of a copy of M, giving M and P for the expert.">
+      <defs><marker id="b" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M2 1L8 5L2 9" fill="none" stroke="var(--muted)" stroke-width="1.6"/></marker>
+        <marker id="bm" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M2 1L8 5L2 9" fill="none" stroke="var(--mem)" stroke-width="1.6"/></marker></defs>
+      <text x="20" y="24" font-size="13" font-weight="600" class="t">Training · per sample</text>
+      <g font-size="11" text-anchor="middle">
+        <rect x="20" y="40" width="80" height="40" rx="4" fill="var(--mem-soft)" stroke="var(--mem)"/><text x="60" y="58" fill="var(--mem)" font-weight="600">M</text><text x="60" y="72" fill="var(--mem)" font-size="9">ep. frame 0</text>
+        <rect x="104" y="40" width="150" height="40" rx="4" fill="var(--now-soft)" stroke="var(--now)"/><text x="179" y="58" fill="var(--now)" font-weight="600">now + S</text><text x="179" y="72" fill="var(--now)" font-size="9">sample's frame</text>
+        <rect x="290" y="34" width="220" height="52" rx="5" fill="var(--off)" stroke="var(--line)"/><text x="400" y="56" class="t" font-size="12" font-weight="600">VLM · one pass</text><text x="400" y="72" class="m" font-size="10">block mask from section 2</text>
+        <rect x="546" y="40" width="50" height="40" rx="4" fill="var(--mem-soft)" stroke="var(--mem)"/><text x="571" y="64" fill="var(--mem)" font-weight="600">Mᵢ</text>
+        <rect x="598" y="40" width="70" height="40" rx="4" fill="var(--surface)" stroke="var(--now)"/><text x="633" y="64" fill="var(--now)" font-weight="600">Pᵢ</text>
+        <rect x="704" y="34" width="196" height="52" rx="5" fill="var(--act-soft)" stroke="var(--act)"/><text x="802" y="56" fill="var(--act)" font-size="12" font-weight="600">expert, 1 pass</text><text x="802" y="72" fill="var(--act)" font-size="10">loss → expert weights</text>
+      </g>
+      <g stroke="var(--muted)" fill="none"><line x1="254" y1="60" x2="286" y2="60" marker-end="url(#b)"/><line x1="510" y1="60" x2="542" y2="60" marker-end="url(#b)"/><line x1="668" y1="60" x2="700" y2="60" marker-end="url(#b)"/></g>
+
+      <line x1="20" y1="118" x2="900" y2="118" stroke="var(--line)"/>
+
+      <text x="20" y="148" font-size="13" font-weight="600" class="t">Eval · one trial</text>
+      <g font-size="11" text-anchor="middle" class="m"><text x="150" y="170">chunk 1</text><text x="450" y="170">chunk 2</text><text x="750" y="170">chunk 3 …</text></g>
+
+      <!-- memory computed once -->
+      <g font-size="11" text-anchor="middle">
+        <rect x="20" y="184" width="80" height="40" rx="4" fill="var(--mem-soft)" stroke="var(--mem)"/><text x="60" y="202" fill="var(--mem)" font-weight="600">M</text><text x="60" y="216" fill="var(--mem)" font-size="9">this frame</text>
+        <rect x="120" y="184" width="130" height="40" rx="5" fill="var(--off)" stroke="var(--line)"/><text x="185" y="202" class="t" font-weight="600">VLM, M alone</text><text x="185" y="216" class="m" font-size="9">once per trial</text>
+      </g>
+      <line x1="100" y1="204" x2="116" y2="204" stroke="var(--muted)" marker-end="url(#b)"/>
+      <rect x="270" y="190" width="630" height="28" rx="4" fill="var(--mem-soft)" stroke="var(--mem)"/>
+      <text x="585" y="209" font-size="11" text-anchor="middle" fill="var(--mem)" font-weight="600">Mᵢ kept for the whole trial (every layer)</text>
+      <line x1="250" y1="204" x2="266" y2="204" stroke="var(--mem)" marker-end="url(#bm)"/>
+
+      <!-- per chunk -->
+      <g font-size="11" text-anchor="middle">
+        <rect x="40" y="252" width="220" height="40" rx="5" fill="var(--now-soft)" stroke="var(--now)"/><text x="150" y="270" fill="var(--now)" font-weight="600">VLM, now + S only</text><text x="150" y="284" fill="var(--now)" font-size="9">reads Mᵢ, positions from 64</text>
+        <rect x="340" y="252" width="220" height="40" rx="5" fill="var(--now-soft)" stroke="var(--now)"/><text x="450" y="270" fill="var(--now)" font-weight="600">VLM, now + S only</text><text x="450" y="284" fill="var(--now)" font-size="9">reads Mᵢ, positions from 64</text>
+        <rect x="640" y="252" width="220" height="40" rx="5" fill="var(--now-soft)" stroke="var(--now)"/><text x="750" y="270" fill="var(--now)" font-weight="600">VLM, now + S only</text><text x="750" y="284" fill="var(--now)" font-size="9">reads Mᵢ, positions from 64</text>
+
+        <rect x="40" y="310" width="100" height="34" rx="4" fill="var(--mem-soft)" stroke="var(--mem)"/><text x="90" y="331" fill="var(--mem)" font-weight="600">Mᵢ copy</text>
+        <rect x="142" y="310" width="118" height="34" rx="4" fill="var(--surface)" stroke="var(--now)"/><text x="201" y="331" fill="var(--now)" font-weight="600">P¹ᵢ</text>
+        <rect x="340" y="310" width="100" height="34" rx="4" fill="var(--mem-soft)" stroke="var(--mem)"/><text x="390" y="331" fill="var(--mem)" font-weight="600">Mᵢ copy</text>
+        <rect x="442" y="310" width="118" height="34" rx="4" fill="var(--surface)" stroke="var(--now)"/><text x="501" y="331" fill="var(--now)" font-weight="600">P²ᵢ</text>
+        <rect x="640" y="310" width="100" height="34" rx="4" fill="var(--mem-soft)" stroke="var(--mem)"/><text x="690" y="331" fill="var(--mem)" font-weight="600">Mᵢ copy</text>
+        <rect x="742" y="310" width="118" height="34" rx="4" fill="var(--surface)" stroke="var(--now)"/><text x="801" y="331" fill="var(--now)" font-weight="600">P³ᵢ</text>
+
+        <rect x="40" y="362" width="220" height="40" rx="5" fill="var(--act-soft)" stroke="var(--act)"/><text x="150" y="380" fill="var(--act)" font-weight="600">expert × 10 steps</text><text x="150" y="394" fill="var(--act)" font-size="9">h reads [Mᵢ, P¹ᵢ]</text>
+        <rect x="340" y="362" width="220" height="40" rx="5" fill="var(--act-soft)" stroke="var(--act)"/><text x="450" y="380" fill="var(--act)" font-weight="600">expert × 10 steps</text><text x="450" y="394" fill="var(--act)" font-size="9">h reads [Mᵢ, P²ᵢ]</text>
+        <rect x="640" y="362" width="220" height="40" rx="5" fill="var(--act-soft)" stroke="var(--act)"/><text x="750" y="380" fill="var(--act)" font-weight="600">expert × 10 steps</text><text x="750" y="394" fill="var(--act)" font-size="9">h reads [Mᵢ, P³ᵢ]</text>
+      </g>
+      <g stroke="var(--mem)" fill="none" stroke-dasharray="3 3">
+        <line x1="150" y1="218" x2="150" y2="248" marker-end="url(#bm)"/><line x1="450" y1="218" x2="450" y2="248" marker-end="url(#bm)"/><line x1="750" y1="218" x2="750" y2="248" marker-end="url(#bm)"/>
+      </g>
+      <g stroke="var(--muted)" fill="none">
+        <line x1="150" y1="292" x2="150" y2="306" marker-end="url(#b)"/><line x1="450" y1="292" x2="450" y2="306" marker-end="url(#b)"/><line x1="750" y1="292" x2="750" y2="306" marker-end="url(#b)"/>
+        <line x1="150" y1="344" x2="150" y2="358" marker-end="url(#b)"/><line x1="450" y1="344" x2="450" y2="358" marker-end="url(#b)"/><line x1="750" y1="344" x2="750" y2="358" marker-end="url(#b)"/>
+      </g>
+    </svg>
+    </div>
+    <figcaption>Both give the same Mᵢ and Pᵢ: M never reads the present, so computing it alone or together changes nothing (checked: max diff 0).</figcaption>
+  </figure>
+</section>
+
+
+</div>
