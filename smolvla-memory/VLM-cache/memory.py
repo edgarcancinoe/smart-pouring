@@ -21,7 +21,7 @@ import state_dropout
 CAMERA = "observation.images.image"  # the camera remembered: the agentview shows where the mug stands
 CACHE = True   # eval: the memory's keys and values computed once per trial (False: again with every chunk, as in training)
 BLANK = False  # eval ablation: an empty memory (pad mask 0), the same as no memory
-ISOLATE = False  # the present doesn't read the memory, only the expert does (set by VLM-cache-isolated/isolated.py)
+ISOLATE = False  # the current obs doesn't read the memory, only the expert does (set by VLM-cache-isolated/isolated.py)
 
 TABLE = None  # training: (episodes, 3, H, W) uint8, each episode's first CAMERA frame, by episode_index
 
