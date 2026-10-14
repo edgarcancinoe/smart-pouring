@@ -31,6 +31,7 @@
 #   ./run relative-eval  [model ...] [--jobs 8]   relative-actions models in the sim (as ./run eval)
 #   ./run memory-eval    [model ...] [--jobs 8]   VLM-cache memory models in the sim (as ./run eval)
 #   ./run isolated-eval  [model ...] [--jobs 8]   isolated VLM-cache memory models in the sim (as ./run eval)
+#   ./run memory-check   [model ...]              does a memory model use its memory? is eval's cache exact? (no sim)
 
 cd "$(dirname "$0")" || exit 1
 export PYTHONPATH=. PYTHONWARNINGS=ignore PYTHONUNBUFFERED=1
@@ -65,7 +66,8 @@ case "$cmd" in
   grasp-pos-eval) PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position MUJOCO_GL=$gl exec $py smolvla-memory/grasp-position/eval_grasp_position.py "$@" ;;
   relative-eval)  PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions MUJOCO_GL=$gl exec $py smolvla-memory/relative-actions/eval_relative.py "$@" ;;
   memory-eval)    PYTHONPATH=.:smolvla-finetune:smolvla-memory/VLM-cache MUJOCO_GL=$gl exec $py smolvla-memory/VLM-cache/eval_memory.py "$@" ;;
+  memory-check)   PYTHONPATH=.:smolvla-finetune:smolvla-memory/VLM-cache:smolvla-memory/VLM-cache-isolated MUJOCO_GL=$gl exec $py smolvla-memory/VLM-cache/check_memory.py "$@" ;;
   isolated-eval)  PYTHONPATH=.:smolvla-finetune:smolvla-memory/VLM-cache:smolvla-memory/VLM-cache-isolated MUJOCO_GL=$gl exec $py smolvla-memory/VLM-cache-isolated/eval_isolated.py "$@" ;;
   *)         [ -f sim/tools/run ] && . sim/tools/run  # local-only commands, if present (gitignored)
-             sed -n '2,33p' "$0" | sed 's/^# //' ;;
+             sed -n '2,34p' "$0" | sed 's/^# //' ;;
 esac
