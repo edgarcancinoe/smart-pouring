@@ -81,8 +81,8 @@ code { font-family: var(--mono); font-size: 0.85em; }
         <rect x="446" y="182" width="30" height="34" rx="4" fill="var(--state-soft)" stroke="var(--state)"/><text x="461" y="203" fill="var(--state)">S</text>
       </g>
       <g font-size="10" class="m mono" text-anchor="middle"><text x="165" y="232">block 0</text><text x="328" y="232">block 1</text><text x="461" y="232">2</text></g>
-      <g font-size="10" class="m" text-anchor="middle"><text x="165" y="250">frame at t = 0</text><text x="345" y="250">frame now</text></g>
-      <path d="M214 176 L214 168" stroke="var(--mem)"/><text x="218" y="166" font-size="10" fill="var(--mem)">flag = 1 here</text>
+      <g font-size="10" class="m" text-anchor="middle"><text x="165" y="250">frame at t = 0</text><text x="345" y="250">current frame</text></g>
+      <path d="M214 176 L214 168" stroke="var(--mem)"/><text x="218" y="166" font-size="10" fill="var(--mem)">block 1 starts here</text>
 
       <!-- shared right side -->
       <g font-size="12" text-anchor="middle">
@@ -103,7 +103,7 @@ code { font-family: var(--mono); font-size: 0.85em; }
       <line x1="20" y1="130" x2="900" y2="130" stroke="var(--line)"/>
     </svg>
     </div>
-    <figcaption>M = the start frame's agentview through the same SigLIP + connector as the cameras. The flag on the first "now" token shifts the present to block 1.</figcaption>
+    <figcaption>M = the start frame's agentview through the same SigLIP + connector as the cameras. Block numbers decide who reads whom (section 2): the memory is block 0, so the current frame moves to block 1.</figcaption>
   </figure>
 </section>
 
@@ -111,9 +111,9 @@ code { font-family: var(--mono); font-size: 0.85em; }
   <span class="tag">2 · Who reads whom</span>
   <figure>
     <div class="scroll">
-    <svg viewBox="0 0 560 300" width="560" style="max-width:100%;height:auto;min-width:420px" role="img" aria-label="Mask: memory reads memory. Now reads memory and now. State reads memory, now, state. Expert tokens read memory, now, state and earlier expert tokens.">
-      <g font-size="12" text-anchor="middle" class="m"><text x="190" y="22">M</text><text x="290" y="22">now</text><text x="370" y="22">S</text><text x="460" y="22">h</text></g>
-      <g font-size="12" text-anchor="end" class="m"><text x="128" y="78">M</text><text x="128" y="158">now</text><text x="128" y="218">S</text><text x="128" y="270">h</text></g>
+    <svg viewBox="0 0 560 300" width="560" style="max-width:100%;height:auto;min-width:420px" role="img" aria-label="Mask: memory reads memory. Current frame reads memory and itself. State reads memory, now, state. Expert tokens read memory, now, state and earlier expert tokens.">
+      <g font-size="12" text-anchor="middle" class="m"><text x="190" y="22">M</text><text x="290" y="22">current</text><text x="370" y="22">S</text><text x="460" y="22">h</text></g>
+      <g font-size="12" text-anchor="end" class="m"><text x="128" y="78">M</text><text x="128" y="158">current</text><text x="128" y="218">S</text><text x="128" y="270">h</text></g>
       <rect x="140" y="35" width="100" height="80" fill="var(--mem)" opacity="0.85"/>
       <rect x="240" y="35" width="100" height="80" fill="var(--off)"/><rect x="340" y="35" width="60" height="80" fill="var(--off)"/><rect x="400" y="35" width="120" height="80" fill="var(--off)"/>
       <rect x="140" y="115" width="100" height="80" fill="var(--now)" opacity="0.55"/><rect x="240" y="115" width="100" height="80" fill="var(--now)" opacity="0.85"/>
@@ -136,13 +136,13 @@ code { font-family: var(--mono); font-size: 0.85em; }
   <span class="tag">3 · The VLM pass: training vs eval</span>
   <figure>
     <div class="scroll">
-    <svg viewBox="0 0 920 420" width="920" style="max-width:100%;height:auto;min-width:700px" role="img" aria-label="Training: memory and now in one VLM pass with the block mask, giving M and P keys and values. Eval: M alone through the VLM at the first chunk, kept; each chunk runs only now on top of a copy of M, giving M and P for the expert.">
+    <svg viewBox="0 0 920 420" width="920" style="max-width:100%;height:auto;min-width:700px" role="img" aria-label="Training: memory and current frame in one VLM pass with the block mask, giving M and P keys and values. Eval: M alone through the VLM at the first chunk, kept; each chunk runs only the current frame on top of a copy of M, giving M and P for the expert.">
       <defs><marker id="b" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M2 1L8 5L2 9" fill="none" stroke="var(--muted)" stroke-width="1.6"/></marker>
         <marker id="bm" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M2 1L8 5L2 9" fill="none" stroke="var(--mem)" stroke-width="1.6"/></marker></defs>
       <text x="20" y="24" font-size="13" font-weight="600" class="t">Training · per sample</text>
       <g font-size="11" text-anchor="middle">
         <rect x="20" y="40" width="80" height="40" rx="4" fill="var(--mem-soft)" stroke="var(--mem)"/><text x="60" y="58" fill="var(--mem)" font-weight="600">M</text><text x="60" y="72" fill="var(--mem)" font-size="9">ep. frame 0</text>
-        <rect x="104" y="40" width="150" height="40" rx="4" fill="var(--now-soft)" stroke="var(--now)"/><text x="179" y="58" fill="var(--now)" font-weight="600">now + S</text><text x="179" y="72" fill="var(--now)" font-size="9">sample's frame</text>
+        <rect x="104" y="40" width="150" height="40" rx="4" fill="var(--now-soft)" stroke="var(--now)"/><text x="179" y="58" fill="var(--now)" font-weight="600">current frame + state</text><text x="179" y="72" fill="var(--now)" font-size="9">sample's frame</text>
         <rect x="290" y="34" width="220" height="52" rx="5" fill="var(--off)" stroke="var(--line)"/><text x="400" y="56" class="t" font-size="12" font-weight="600">VLM · one pass</text><text x="400" y="72" class="m" font-size="10">block mask from section 2</text>
         <rect x="546" y="40" width="50" height="40" rx="4" fill="var(--mem-soft)" stroke="var(--mem)"/><text x="571" y="64" fill="var(--mem)" font-weight="600">Mᵢ</text>
         <rect x="598" y="40" width="70" height="40" rx="4" fill="var(--surface)" stroke="var(--now)"/><text x="633" y="64" fill="var(--now)" font-weight="600">Pᵢ</text>
@@ -167,9 +167,9 @@ code { font-family: var(--mono); font-size: 0.85em; }
 
       <!-- per chunk -->
       <g font-size="11" text-anchor="middle">
-        <rect x="40" y="252" width="220" height="40" rx="5" fill="var(--now-soft)" stroke="var(--now)"/><text x="150" y="270" fill="var(--now)" font-weight="600">VLM, now + S only</text><text x="150" y="284" fill="var(--now)" font-size="9">reads Mᵢ, positions from 64</text>
-        <rect x="340" y="252" width="220" height="40" rx="5" fill="var(--now-soft)" stroke="var(--now)"/><text x="450" y="270" fill="var(--now)" font-weight="600">VLM, now + S only</text><text x="450" y="284" fill="var(--now)" font-size="9">reads Mᵢ, positions from 64</text>
-        <rect x="640" y="252" width="220" height="40" rx="5" fill="var(--now-soft)" stroke="var(--now)"/><text x="750" y="270" fill="var(--now)" font-weight="600">VLM, now + S only</text><text x="750" y="284" fill="var(--now)" font-size="9">reads Mᵢ, positions from 64</text>
+        <rect x="40" y="252" width="220" height="40" rx="5" fill="var(--now-soft)" stroke="var(--now)"/><text x="150" y="270" fill="var(--now)" font-weight="600">VLM, current frame + state</text><text x="150" y="284" fill="var(--now)" font-size="9">reads Mᵢ, positions from 64</text>
+        <rect x="340" y="252" width="220" height="40" rx="5" fill="var(--now-soft)" stroke="var(--now)"/><text x="450" y="270" fill="var(--now)" font-weight="600">VLM, current frame + state</text><text x="450" y="284" fill="var(--now)" font-size="9">reads Mᵢ, positions from 64</text>
+        <rect x="640" y="252" width="220" height="40" rx="5" fill="var(--now-soft)" stroke="var(--now)"/><text x="750" y="270" fill="var(--now)" font-weight="600">VLM, current frame + state</text><text x="750" y="284" fill="var(--now)" font-size="9">reads Mᵢ, positions from 64</text>
 
         <rect x="40" y="310" width="100" height="34" rx="4" fill="var(--mem-soft)" stroke="var(--mem)"/><text x="90" y="331" fill="var(--mem)" font-weight="600">Mᵢ copy</text>
         <rect x="142" y="310" width="118" height="34" rx="4" fill="var(--surface)" stroke="var(--now)"/><text x="201" y="331" fill="var(--now)" font-weight="600">P¹ᵢ</text>
