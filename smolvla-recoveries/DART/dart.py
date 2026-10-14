@@ -17,10 +17,10 @@ from dataset.sim_runs import playback
 from dataset.upload import upload
 
 RUNS = 32           # noisy replays per recording (<clip>~d1 ... ~d32), each with its own mug shift as well
-NOISE_CM = 1.5      # std of the push added to each step's position command, cm
-NOISE_DEG = 3.0     # ... to its rotation command, deg
+NOISE_CM = 1.0      # std of the push added to each step's position command, cm (as xl: full-xl differs from it only by the follow pushes)
+NOISE_DEG = 2.0     # ... to its rotation command, deg
 PHASES = ("reach", "follow")  # pushed: the way to the mug and the carry, pour and put-back (xl: reach only, 1 cm, 2 deg, 16 runs)
-FOLLOW_SCALE = 0.4  # follow pushes are this share of the reach's: at full size the held mug slipped out (10/32 succeeded)
+FOLLOW_SCALE = 0.5  # follow pushes are this share of the reach's: at full size (1.5 cm) the held mug slipped out (10/32 succeeded)
 RHO = 0.9           # push correlation from step to step (~0.5 s at 20 Hz): slow drifts, like a policy's errors
 # datasets --export makes -> DART runs per recording each takes (~d1 ... ~d<n>), in dataset/data/lerobot/ and on the Hub
 EXPORTS = {"water_pour_dart_full-xl": 16, "water_pour_dart_full-xxl": RUNS}
