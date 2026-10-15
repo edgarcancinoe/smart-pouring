@@ -87,6 +87,11 @@ MODELS = {
     "libero-4s-dart-xl-sd-memiso": dict(start=LIBERO, k=4, repo="edgarcancinoe/smolvla_water_libero-4s-dart-xl-sd-memiso",
                                         data="edgarcancinoe/water_pour_dart_xl", dropout=0.3,
                                         script="smolvla-memory/VLM-cache-isolated/isolated.py"),
+    # full-xxl-rel-b64 dagger
+    "libero-4s-dart-full-xxl-sd-rel-b64-dagger1": dict(start="libero-4s-dart-full-xxl-sd-rel-b64", k=4,
+                                                       repo="edgarcancinoe/smolvla_water_libero-4s-dart-full-xxl-sd-rel-b64-dagger1",
+                                                       data="edgarcancinoe/water_pour_dagger1", dropout=0.3, batch=64, steps=8_000,
+                                                       script="smolvla-memory/relative-actions/relative.py"),
 }
 
 
