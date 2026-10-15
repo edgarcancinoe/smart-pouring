@@ -14,7 +14,7 @@ Success = water in the plant and the mug put back where the demonstration ended.
 Writes, in dataset/data/<group>/<clip>/: robot.json (result), robot_states.npz (sim state and action per
 control step: for ./run watch, ./run video and ./run export) and, if VIDEO, robot.mp4.
 
-Each clip also runs SHIFTS more times as <clip>~1, <clip>~2, ...: the mug (and the whole pour) shifted by up to
+Each clip also runs SHIFTS more times as <clip>~1, <clip>~2, ...: the mug (pick-up and put-back; the pour stays over the pot) shifted by up to
 SHIFT_CM, so the policy must find the mug in the image instead of memorizing four grasp spots.
 
 Usage: ./run robot [A1-0 ...] [--jobs 4]   (default: every tracked episode)
@@ -280,8 +280,7 @@ def run(clip):
     placed = placed_cm <= PLACED_CM and placed_deg <= PLACED_DEG
     env.close()
 
-    res = dict(clip=clip, plant=prep["side"], tilt=tilt, in_plant=in_plant, watered=watered, placed=placed,
-               success=watered and placed)
+    res = dict(clip=clip, plant=prep["side"], tilt=tilt, in_plant=in_plant, watered=watered, placed=placed, success=watered and placed, pour_anchored=True)  # runs before mug_path.shift_weight moved the pour too
     (episodes.clip_dir(clip) / "robot.json").write_text(json.dumps(res, indent=2))
     rec.save(clip, prep["side"], SPEED, CONTROL_HZ)
     

@@ -9,6 +9,8 @@ from dataset.episodes import SETUP
 
 from dataset.episodes import clip_dir
 FLOOR_TO_SIM = np.array([[0.0, 1.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 0.0, 1.0]])
+POUR_DEG        = 30.0      # the mug tilted this far is pouring: a shifted replay pours where the human did, unshifted
+LIFT_CM         = 1.0       # the mug this far above its start is off the table: the shift fades out / in while carried
 FLIP_DEG        = 25.0      # an orientation this far from its smoothed neighbours is a tracking glitch
 SMOOTH_FRAMES   = 2.0       # gaussian sigma, in video frames (60 fps)
 
@@ -170,6 +172,27 @@ def prepare(clip):
                 spot_err=spot_err, side=side, max_tilt=max_tilt, mouth_err=mouth_err)
 
 
+def shift_weight(t, pos, rot):
+    """How much of the start shift each pose of the path keeps: all of it on the table (pick-up and put-back), none
+    while pouring (the pour stays over the pot)
+
+    t        -> (N,) s
+    pos, rot -> the path: (N, 3) m, z up; Rotation (N)
+    returns (N,) weights 0-1
+    """
+    up = np.flatnonzero(pos[:, 2] - pos[0, 2] > LIFT_CM / 100)
+    pour = np.flatnonzero(np.degrees(np.arccos(np.clip(rot.as_matrix()[:, 2, 2], -1, 1))) > POUR_DEG)
+    w = np.ones(len(t))
+    if not len(up) or not len(pour):
+        return w  # never lifted or never poured: the whole path moves, as before
+    lift, a, b, down = min(up[0], pour[0]), pour[0], pour[-1], max(up[-1], pour[-1])
+    ease = lambda x: x * x * (3 - 2 * x)  # smoothstep: no jump in speed where the blend starts or ends
+    w[lift:a] = 1 - ease((t[lift:a] - t[lift]) / max(t[a] - t[lift], 1e-6))
+    w[a:b + 1] = 0.0
+    w[b + 1:down + 1] = ease((t[b + 1:down + 1] - t[b]) / max(t[down] - t[b], 1e-6))
+    return w
+
+
 def place_in_sim(prep, problem, settle_steps=200, shift=(0.0, 0.0)):
     """Put the sim mug on the clip's start spot (pots on their measured spots), let the droplets
     settle, and return the clip's path in sim world coordinates.
@@ -177,7 +200,7 @@ def place_in_sim(prep, problem, settle_steps=200, shift=(0.0, 0.0)):
     prep        -> dict from prepare()
     problem     -> the LIBERO problem (env.env) of a watering scene
     settle_steps -> physics steps for the droplets to come to rest
-    shift        -> (2,) m added to the start spot; the whole path moves with it
+    shift        -> (2,) m added to the start spot; the pick-up and put-back move with it, the pour doesn't (shift_weight)
     returns times (N,) s from 0, sim_pos (N, 3) m, sim_rot Rotation (N), sim_pos0 (3,) m (sim mug's start)
     """
     from sim.watering.bddl import MUG_STARTS, POTS
@@ -191,5 +214,19 @@ def place_in_sim(prep, problem, settle_steps=200, shift=(0.0, 0.0)):
         problem.sim.step()
     q = problem.sim.data.get_joint_qpos(problem.get_object(problem.mug_name).joints[-1])
     sim_pos0, sim_rot0 = q[:3].copy(), R.from_quat(q[[4, 5, 6, 3]])
+    return (*sim_path(prep, sim_pos0, sim_rot0, shift), sim_pos0)
+
+
+def sim_path(prep, sim_pos0, sim_rot0, shift=(0.0, 0.0)):
+    """The clip's path in sim world coordinates for a mug starting at sim_pos0, the pour kept where the human
+    poured (shift_weight)
+
+    prep               -> dict from prepare()
+    sim_pos0, sim_rot0 -> sim mug's start: (3,) m, Rotation
+    shift              -> (2,) m the start is away from the clip's spot
+    returns times (N,) s from 0, sim_pos (N, 3) m, sim_rot Rotation (N)
+    """
     sim_pos, sim_rot = to_sim(prep["pos"], prep["rot"], prep["pos0"], prep["rot0"], sim_pos0, sim_rot0)
-    return prep["t"] - prep["t"][0], sim_pos, sim_rot, sim_pos0
+    t = prep["t"] - prep["t"][0]
+    sim_pos -= np.outer(1 - shift_weight(t, sim_pos, sim_rot), [*shift, 0.0])  # to_sim moved every pose by the shift
+    return t, sim_pos, sim_rot

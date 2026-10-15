@@ -5,6 +5,7 @@ Usage: ./run dart [A1-0 ...] [--jobs 4]   (default: every tracked episode)
        ./run dart-export
 """
 import argparse
+import json
 import zlib
 
 import numpy as np
@@ -16,14 +17,14 @@ from dataset.retarget.robot_replay import MAX_STEP
 from dataset.sim_runs import playback
 from dataset.upload import upload
 
-RUNS = 32           # noisy replays per recording (<clip>~d1 ... ~d32), each with its own mug shift as well
+RUNS = 16           # noisy replays per recording (<clip>~d1 ... ~d16), each with its own mug shift as well (xxl: 32)
 NOISE_CM = 1.0      # std of the push added to each step's position command, cm (as xl: full-xl differs from it only by the follow pushes)
 NOISE_DEG = 2.0     # ... to its rotation command, deg
 PHASES = ("reach", "follow")  # pushed: the way to the mug and the carry, pour and put-back (xl: reach only, 1 cm, 2 deg, 16 runs)
 FOLLOW_SCALE = 0.5  # follow pushes are this share of the reach's: at full size (1.5 cm) the held mug slipped out (10/32 succeeded)
 RHO = 0.9           # push correlation from step to step (~0.5 s at 20 Hz): slow drifts, like a policy's errors
 # datasets --export makes -> DART runs per recording each takes (~d1 ... ~d<n>), in dataset/data/lerobot/ and on the Hub
-EXPORTS = {"water_pour_dart_full-xl": 16, "water_pour_dart_full-xxl": RUNS}
+EXPORTS = {"water_pour_dart_full_anchor-xl": 16}  # _anchor: the pour stays over the pot (mug_path.shift_weight); xxl: add "..._anchor-xxl": 32
 
 SIGMA = np.r_[[NOISE_CM / 100] * 3, [np.radians(NOISE_DEG)] * 3] / MAX_STEP  # push std in action units
 _state = {}  # per clip: random generator and the current push
@@ -46,6 +47,12 @@ def perturb(action, phase, steps):
 robot_replay.perturb = perturb  # at import, so the spawned workers get it too
 
 
+def anchored(clip):
+    """The clip has a robot run made with the anchored pour (robot.json pour_anchored); older runs get redone."""
+    path = episodes.clip_dir(clip) / "robot.json"
+    return path.exists() and json.loads(path.read_text()).get("pour_anchored", False)
+
+
 def run(clip):
     """One noisy replay (robot_replay.run) in data/dart/<clip>/.
 
@@ -64,12 +71,15 @@ def main():
     p.add_argument("--export", action="store_true", help="export + upload (passed by ./run dart-export)")
     args = p.parse_args()
     if args.export:
+        old = [c for c in playback.saved() if "~" in c and not anchored(c)]
+        if old:
+            raise SystemExit(f"{len(old)} shifted runs from before the anchored pour (e.g. {old[0]}): ./run robot and ./run dart again")
         for name, n in EXPORTS.items():  # the recordings, their shifted replays and DART runs 1 ... n
             export([c for c in playback.saved() if not episodes.parse(c)["dart"] or episodes.parse(c)["shift"] <= n], name)
             upload(name, f"edgarcancinoe/{name}")
         return
     clips = [f"{c}~d{i}" for c in args.clips or episodes.tracked() for i in range(1, RUNS + 1)
-             if not (episodes.DATA / "dart" / f"{c}~d{i}" / "robot.json").exists()]  # done before (same seed): skip
+             if not anchored(f"{c}~d{i}")]  # done before (same seed): skip
     done = 0
     for r in episodes.parallel_map(run, clips, {}, args.jobs, "dart"):
         if "error" in r:
