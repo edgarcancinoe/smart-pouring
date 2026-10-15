@@ -33,6 +33,7 @@ MUG_JITTER = 0.03                   # m, +- around the spot, as the shifted demo
 SEED = 10_000                       # added to evaluate.trial_seed: never the seed of an eval trial (< 3000)
 GATE = {"reach": (1.0, 0.3),        # per teacher stage: cm off its path at which the teacher takes over,
         "carry": (2.0, 0.5),        # ... and back within which it hands back (the pour moves fast: looser)
+        "put-back": (1.0, 0.3),     # the carry's last 5 cm (teacher.PUT_BACK_CM): placed means within 3 cm
         "release": (2.0, 0.5)}
 MIN_TAKEOVER = 10                   # control steps a takeover lasts at least (no flicker between drivers)
 CHECK_PUSH_CM = 3.0                 # dagger-check: how far the hand wanders off the start pose before the teacher drives, cm
@@ -72,12 +73,14 @@ def ended(e, obs, mug, end):
 
 
 def outcome(e, obs, mug, end):
-    """lifted, watered, placed (as evaluate.trial)."""
+    """lifted, watered, placed (as evaluate.trial) + why not placed: released, off_cm, tilt."""
     pos, rot, _ = ev.mug_pose(e)
-    tilt = np.degrees(np.arccos(np.clip(rot.apply([0, 0, 1])[2], -1, 1)))
-    released = np.linalg.norm(obs["robot0_eef_pos"] - pos) > ev.RELEASE_CM / 100
-    placed = released and np.linalg.norm(pos[:2] - mug[:2]) * 100 <= ev.PLACED_CM and tilt <= ev.PLACED_DEG
-    return bool(end.get("lifted")), bool(e._check_success()), bool(placed)
+    tilt = float(np.degrees(np.arccos(np.clip(rot.apply([0, 0, 1])[2], -1, 1))))
+    released = bool(np.linalg.norm(obs["robot0_eef_pos"] - pos) > ev.RELEASE_CM / 100)
+    off_cm = float(np.linalg.norm(pos[:2] - mug[:2]) * 100)
+    placed = released and off_cm <= ev.PLACED_CM and tilt <= ev.PLACED_DEG
+    return dict(lifted=bool(end.get("lifted")), watered=bool(e._check_success()), placed=placed,
+                released=released, off_cm=round(off_cm, 1), tilt=round(tilt))
 
 
 def grasp_memory():
@@ -121,7 +124,7 @@ def rollout(job):
         # who drives this step
         teacher.observe(obs)               # the teacher follows the rollout whoever drives: stage, carry progress
         off = teacher.off_track_cm(obs)    # cm between the hand and the teacher's path, now
-        take, back = GATE[teacher.stage]
+        take, back = GATE[teacher.gate]
 
         # policy driving and too far off: the teacher takes the wheel
         if takeover is None and off > take:
@@ -148,11 +151,11 @@ def rollout(job):
         if ended(e, obs, mug, end):
             break
 
-    up, watered, placed = outcome(e, obs, mug, end)
+    out = outcome(e, obs, mug, end)
     if takeover is not None:  # the rollout ended with the teacher driving
-        save(takeover, memory, f"r{ROUND}-{job}-t{n}", plant, watered and placed)
+        save(takeover, memory, f"r{ROUND}-{job}-t{n}", plant, out["watered"] and out["placed"])
         n += 1
-    return dict(clip=job, lifted=up, watered=watered, placed=placed, takeovers=n)
+    return dict(clip=job, **out, steps=k + 1, takeovers=n)
 
 
 def check(job):
@@ -166,13 +169,12 @@ def check(job):
     for _ in range(CHECK_PUSH_STEPS):
         obs, *_ = env.step(np.r_[np.clip(rng.normal(0, push), -1, 1), -1])
     end = {}
-    for _ in range(ev.MAX_STEPS):
+    for k in range(ev.MAX_STEPS):
         teacher.observe(obs)
         obs, *_ = env.step(teacher.act(obs)[0])
         if ended(env.env, obs, mug, end):
             break
-    up, watered, placed = outcome(env.env, obs, mug, end)
-    return dict(clip=job, lifted=up, watered=watered, placed=placed)
+    return dict(clip=job, **outcome(env.env, obs, mug, end), steps=k + 1)
 
 
 def memory_column(clip, actions, states):
@@ -206,6 +208,8 @@ def main():
     for r in results:
         if "error" in r:
             print(f"{r['clip']}: {r['error']}")
+        elif not r["placed"]:  # why: still held (out of time?), too far, or tipped
+            print(f"{r['clip']}: not placed: released {r['released']}, {r['off_cm']} cm off, {r['tilt']} deg, {r['steps']} steps")
     count = lambda key: sum(bool(r.get(key)) for r in results)
     print(f"\nlifted {count('lifted')}, watered {count('watered')}, placed {count('placed')} of {len(jobs)}"
           + ("" if args.check else f"; {sum(r.get('takeovers', 0) for r in results)} takeovers saved in {OUT}"))

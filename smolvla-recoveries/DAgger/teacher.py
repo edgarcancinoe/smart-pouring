@@ -29,6 +29,9 @@ CLOSING_SPEED = 0.005    # m/s the fingers move together at, at least, to count 
 EMPTY_CM = 2.0           # fingers closer than this, not opening, hold nothing (open: 7.9 cm, mug: 5.4, start pose: 1.6)
 HELD_CM = (4.0, 7.0)     # fingers stopped this far apart, at the grip point, hold the mug
 WINDOW_S = (0.5, 2.0)    # seconds of path behind / ahead of the last progress searched for the nearest pose
+PUT_BACK_CM = 5.0        # carry: the mug this close to where it is set down is the put-back (dagger.GATE: tighter)
+OPENED_CM = 0.3          # carry: fingers this much wider than at the grasp are letting go
+DOWN_CM = 1.0            # carry: the mug this close above where it is set down is down: only then let go
 OPEN_CM = 7.8            # release: fingers this far apart are open, as robot_replay
 OPEN_STEPS = 40          # ... or after this many control steps anyway
 
@@ -127,6 +130,8 @@ class Teacher:
         ts = np.arange(0.0, t[-1], DT)  # one pose per control step, as robot_replay plays it
         self.mug_pos = np.column_stack([np.interp(ts, t, mpos[:, j]) for j in range(3)])
         self.mug_rot = Slerp(t, mrot)(ts)
+        far = np.flatnonzero(np.linalg.norm(self.mug_pos - self.mug_pos[-1], axis=1) > PUT_BACK_CM / 100)
+        self.put_back = far[-1] + 1 if len(far) else 0  # carry poses from here on: the put-back
 
         self.stage = "reach"
         self.ref = self.reach_ref()  # the current stage's path: (positions (M, 3) m, Rotation (M))
@@ -135,6 +140,11 @@ class Teacher:
         self.closed = 0              # reach: control steps the teacher has been closing the gripper for
         self.settle = 0              # reach: control steps spent near the grip point without lining up
         self.opening = 0             # release: control steps spent opening
+
+    @property
+    def gate(self):
+        """Stage for dagger.GATE: the carry's put-back gets its own."""
+        return "put-back" if self.stage == "carry" and self.k >= self.put_back else self.stage
 
     @property
     def busy(self):
@@ -165,9 +175,10 @@ class Teacher:
                 mug, mug_r, _ = mug_pose(self.e)
                 off_p, off_r = mug_r.inv().apply(p - mug), mug_r.inv() * r
                 self.ref = (self.mug_pos + self.mug_rot.apply(off_p), self.mug_rot * off_r)
-                self.stage, self.k = "carry", 0
+                self.stage, self.k, self.held_cm = "carry", 0, w
         elif self.stage == "carry":
-            if self.k >= len(self.ref[0]) - 1:  # the mug is back on its spot: the demo's release, from where the hand is
+            down = mug_pose(self.e)[0][2] - self.mug_pos[-1][2] < DOWN_CM / 100
+            if self.k >= len(self.ref[0]) - 1 and down:  # the mug is back on its spot: the demo's release, from where the hand is
                 dp, dr = p - self.release_pos[0], (r * self.release_rot[0].inv()).as_rotvec()
                 self.ref = bend(self.release_pos, self.release_rot, dp, dr, 1 - ramp(self.release_pos))
                 self.stage, self.k = "release", 0
@@ -179,9 +190,12 @@ class Teacher:
         self.k = min(max(k, self.k + 1), len(self.ref[0]) - 1) if on else k  # on it: at least the demo's pace
 
     def off_track_cm(self, obs):
-        """cm off the path. Reach while closing / empty: cm off the grip point (closing elsewhere is a mistake)."""
+        """cm off the path. Reach while closing / empty: cm off the grip point (closing elsewhere is a mistake).
+        Carry while opening: off (letting go before the mug is down is a mistake)."""
         p, r = eef_pose(obs)
         v = obs["robot0_gripper_qvel"][0] - obs["robot0_gripper_qvel"][1]  # > 0: opening
+        if self.stage == "carry" and width_cm(obs) > self.held_cm + OPENED_CM:
+            return np.inf
         if self.stage == "reach" and (v < -CLOSING_SPEED or (width_cm(obs) < EMPTY_CM and v < CLOSING_SPEED)):
             grip, rg = self.grip()
             return max(100 * np.linalg.norm(p - grip), degrees(r, rg) / DEG_PER_CM)
