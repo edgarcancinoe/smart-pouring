@@ -187,7 +187,8 @@ def memory_column(clip, actions, states):
 
 def dagger_clips():
     """Saved takeovers up to ROUND."""
-    return sorted(d.name for d in OUT.glob("r*") if (d / playback.FILE).exists() and int(d.name.split("-")[0][1:]) <= ROUND)
+    return sorted(d.name for d in OUT.glob("r*") if (d / playback.FILE).exists() and int(d.name.split("-")[0][1:]) <= ROUND
+                  and len(np.load(d / "grasp_memory.npy")) >= 2)  # a takeover begun on the rollout's last step has 1 frame: LeRobot can't make its video stats
 
 
 def main():
