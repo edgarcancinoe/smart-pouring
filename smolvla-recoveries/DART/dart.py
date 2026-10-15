@@ -75,7 +75,7 @@ def main():
         if old:
             raise SystemExit(f"{len(old)} shifted runs from before the anchored pour (e.g. {old[0]}): ./run robot and ./run dart again")
         for name, n in EXPORTS.items():  # the recordings, their shifted replays and DART runs 1 ... n
-            export([c for c in playback.saved() if not episodes.parse(c)["dart"] or episodes.parse(c)["shift"] <= n], name)
+            export([c for c in playback.saved() if (p := episodes.parse(c)) and (not p["dart"] or p["shift"] <= n)], name)  # not DAgger takeovers
             upload(name, f"edgarcancinoe/{name}")
         return
     clips = [f"{c}~d{i}" for c in args.clips or episodes.tracked() for i in range(1, RUNS + 1)

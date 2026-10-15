@@ -108,7 +108,7 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("clips", nargs="*")
     args = p.parse_args()
-    export(args.clips or [c for c in playback.saved() if not (episodes.parse(c) or {}).get("dart")])  # DART runs: their own dataset
+    export(args.clips or [c for c in playback.saved() if (p := episodes.parse(c)) and not p["dart"]])  # DART runs: their own dataset
 
 
 if __name__ == "__main__":
