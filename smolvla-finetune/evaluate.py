@@ -1,12 +1,13 @@
 """SmolVLA models drive the Panda in the watering scene: 3 plants x 8 start spots x TRIALS. See README.md.
 
 Writes results/<model>/<plant>-<spot>.json (one dict per trial) and videos/<plant>-<spot>.mp4; results/n<N>/<model>/ for N_ACTION_STEPS != 10,
-results/n<N>-t<seconds>/<model>/ for MAX_STEPS != 1200.
+results/n<N>-t<seconds>/<model>/ for MAX_STEPS != 1200; .../s<SEED>/<model>/ for SEED != 0.
 ./run eval-grasp: the same trials, ended once the mug is lifted (or after GRASP_STEPS) -> results/grasp-n<N_ACTION_STEPS>/<model>/.
 
 Usage: ./run eval [libero-0 libero-4 libero-4@10000 ...] [--jobs 2]   (default: MODELS; <model>@<step>: the checkpoint at that step)
        N_ACTION_STEPS=5 ./run eval [...]
        N_ACTION_STEPS=5 MAX_STEPS=1800 ./run eval [...]   (90 s per trial)
+       SEED=10000 ./run eval [...]   (other trials: another seed set, for confidence intervals)
        ./run eval-grasp [libero-4 ...] [--jobs 2]
 (eval_watch.py: the same trials, live in the viewer)
 """
@@ -44,7 +45,8 @@ TRAINED_SPOTS = (1, 2, 3, 4)
 MODELS = ["libero-4", "base-4", "libero-4s", "base-4s", "libero-4s-b64", "base-4s-b64"]
 UNITS = [f"{plant}-{spot}" for plant in PLANTS for spot in SPOTS]  # every plant x spot; or e.g. ["left-1", "right-6"]
 TRIALS = 5              # trials per plant x spot (24 x 5 = 120 per model; the first evals ran 7)
-SEED = 0                # trial seeds derive from it (mug jitter, policy noise): the same for every model
+SEED = int(os.environ.get("SEED", 0))  # trial seeds derive from it (mug jitter, policy noise): the same for every model;
+                        # another seed set: a multiple of 10000 (one set's seeds span < 4000)
 MUG_JITTER = 0.01       # m, uniform +- around the spot
 N_ACTION_STEPS = int(os.environ.get("N_ACTION_STEPS", 10))  # actions run from each predicted chunk (50) before the policy looks again;
                         # env var so two evals with different N can run side by side (the spawned workers re-read it)
@@ -61,7 +63,8 @@ PROGRESS_EVERY = 200    # control steps between those clock lines
 VIDEO_EVERY = 2         # film every Nth control step
 VIDEO_SIZE = 256        # px per camera panel
 RESULTS = Path(__file__).parent / "results" / ("" if (N_ACTION_STEPS, MAX_STEPS) == (10, 1200) else  # n10, 60 s: the main results
-                                               f"n{N_ACTION_STEPS}" + ("" if MAX_STEPS == 1200 else f"-t{MAX_STEPS // CONTROL_HZ}"))
+                                               f"n{N_ACTION_STEPS}" + ("" if MAX_STEPS == 1200 else f"-t{MAX_STEPS // CONTROL_HZ}")) \
+          / ("" if SEED == 0 else f"s{SEED}")
 OPEN = np.r_[np.zeros(6), -1.0]  # no motion, gripper open
 
 _cache = {}  # per process: the loaded model and one env per plant
