@@ -7,7 +7,7 @@ import json
 from collections import Counter
 
 import numpy as np
-from scipy.spatial.transform import Rotation as R, Slerp
+from scipy.spatial.transform import Rotation as R
 
 from dataset import episodes
 from dataset.retarget import mug_path as mp
@@ -15,7 +15,6 @@ from dataset.retarget.robot_replay import LEAD_S, SHOULDER_OFFSET, SPEED, action
 from dataset.sim_runs import playback
 from evaluate import mug_pose
 from sim.watering import CONTROL_HZ
-from sim.watering.bddl import MUG_STARTS
 from sim.watering.robot import Arm, grab_point, radial_grip
 
 DEG_PER_CM = 10.0        # an angle error this big counts as 1 cm off the path
@@ -114,24 +113,22 @@ class Teacher:
         self.tilt = demo_tilt(plant, spot)
         clip = demo_clip(plant, spot, self.tilt)
 
-        # the demo robot run's hand, every control step: its reach and release
+        # the demo robot run's hand, every control step: its reach, carry and release
         s = playback.load(clip)
         arm, idx = Arm(e), e.robots[0]._ref_joint_pos_indexes
         hand = [arm.fk(q[idx]) for q in s["qpos"]]
         pos, rot = np.array([h[0] for h in hand]), R.from_matrix([h[1] for h in hand])
-        reach, release = np.flatnonzero(s["phase"] == "reach"), np.flatnonzero(s["phase"] == "release")
+        reach, carry, release = (np.flatnonzero(s["phase"] == ph) for ph in ("reach", "follow", "release"))
         self.reach_pos, self.reach_rot = pos[reach], rot[reach]
+        self.carry_pos, self.carry_rot = pos[carry], rot[carry]  # the robot really drove it: every pose reachable
         self.release_pos, self.release_rot = pos[release], rot[release]
 
-        # the carry's mug path: the recording's pour, the mug starting where it stands now, the pour where the human poured
+        # how much of the mug's shift each carry pose takes: all on the table, none while pouring (mug_path.shift_weight)
         prep = mp.prepare(clip)
         mug0, rot0, _ = mug_pose(e)
-        t, mpos, mrot = mp.sim_path(prep, mug0, rot0, mug0[:2] - np.asarray(MUG_STARTS[prep["spot"]])[:2])
-        ts = np.arange(0.0, t[-1], DT)  # one pose per control step, as robot_replay plays it
-        self.mug_pos = np.column_stack([np.interp(ts, t, mpos[:, j]) for j in range(3)])
-        self.mug_rot = Slerp(t, mrot)(ts)
-        far = np.flatnonzero(np.linalg.norm(self.mug_pos - self.mug_pos[-1], axis=1) > PUT_BACK_CM / 100)
-        self.put_back = far[-1] + 1 if len(far) else 0  # carry poses from here on: the put-back
+        t, mpos, mrot = mp.sim_path(prep, mug0, rot0)
+        self.carry_w = np.interp(np.arange(len(carry)) * DT, t, mp.shift_weight(t, mpos, mrot))  # one pose per step, as robot_replay plays it
+        self.mug_z0 = mug0[2]
 
         self.stage = "reach"
         self.ref = self.reach_ref()  # the current stage's path: (positions (M, 3) m, Rotation (M))
@@ -171,13 +168,14 @@ class Teacher:
             self.ref = self.reach_ref()  # the mug may have been nudged
             stopped = abs(obs["robot0_gripper_qvel"][0] - obs["robot0_gripper_qvel"][1]) < CLOSING_SPEED
             if stopped and np.linalg.norm(p - self.grip()[0]) < 0.02 and HELD_CM[0] < w < HELD_CM[1]:
-                # the mug is in the hand (whoever grasped it): carry it with the real grip, as robot_replay's offset
-                mug, mug_r, _ = mug_pose(self.e)
-                off_p, off_r = mug_r.inv().apply(p - mug), mug_r.inv() * r
-                self.ref = (self.mug_pos + self.mug_rot.apply(off_p), self.mug_rot * off_r)
+                # the mug is in the hand (whoever grasped it): the demo's carry, bent to start at the hand (pour unmoved)
+                dp, dr = p - self.carry_pos[0], (r * self.carry_rot[0].inv()).as_rotvec()
+                self.ref = bend(self.carry_pos, self.carry_rot, dp, dr, self.carry_w)
+                far = np.flatnonzero(np.linalg.norm(self.ref[0] - self.ref[0][-1], axis=1) > PUT_BACK_CM / 100)
+                self.put_back = far[-1] + 1 if len(far) else 0  # carry poses from here on: the put-back
                 self.stage, self.k, self.held_cm = "carry", 0, w
         elif self.stage == "carry":
-            down = mug_pose(self.e)[0][2] - self.mug_pos[-1][2] < DOWN_CM / 100
+            down = mug_pose(self.e)[0][2] - self.mug_z0 < DOWN_CM / 100
             if self.k >= len(self.ref[0]) - 1 and down:  # the mug is back on its spot: the demo's release, from where the hand is
                 dp, dr = p - self.release_pos[0], (r * self.release_rot[0].inv()).as_rotvec()
                 self.ref = bend(self.release_pos, self.release_rot, dp, dr, 1 - ramp(self.release_pos))
@@ -186,7 +184,7 @@ class Teacher:
                 self.stage, self.k, self.closed, self.settle = "reach", 0, 0, 0
                 self.ref = self.reach_ref()
         k, self.off = nearest_sample(p, r, *self.ref, self.k)
-        on = self.off <= ON_PATH_CM
+        on = self.off <= ON_PATH_CM or self.stage == "carry"  # carry: never stop holding the mug, as robot_replay
         self.k = min(max(k, self.k + 1), len(self.ref[0]) - 1) if on else k  # on it: at least the demo's pace
 
     def off_track_cm(self, obs):
@@ -208,7 +206,7 @@ class Teacher:
         k, off = self.k, self.off
         ahead = min(k + LEAD, len(pos) - 1)
         if self.stage == "carry":
-            i = ahead if off <= ON_PATH_CM else k  # on the pour: on along it; off: back to it
+            i = ahead  # at the demo's pace, as robot_replay: a pose it can't reach must not stop it
             return action_to(obs, pos[i], rot[i], 1)[0], "follow"
         if self.stage == "release":
             if width_cm(obs) < OPEN_CM and self.opening < OPEN_STEPS:  # let go first, where the hand is
