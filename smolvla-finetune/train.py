@@ -3,6 +3,7 @@
 Usage: ./run train [libero-4 base-4 ...]   (default: MODELS)
 """
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -20,6 +21,19 @@ LOG_EVERY = 100             # steps between the loss lines in the log
 SAVE_EVERY = 15_000          # steps between local checkpoints (outputs/train/<model>/checkpoints)
 WANDB_PROJECT = "smart-pouring"  # live loss curves at wandb.ai/<you>/smart-pouring
 OUT = Path("outputs/train")
+
+
+def cores():
+    """CPU cores this machine may use: a pod's cgroup quota (it shows the host's 256 but may use ~27), else all."""
+    for path in ("/sys/fs/cgroup/cpu.max", "/sys/fs/cgroup/cpu/cpu.cfs_quota_us"):
+        try:
+            quota, period = (Path(path).read_text().split() if path.endswith("max") else
+                             (Path(path).read_text(), Path(path.replace("quota", "period")).read_text()))
+            if quota.strip() not in ("max", "-1"):
+                return max(1, int(int(quota) / int(period)))
+        except (OSError, ValueError):
+            pass
+    return os.cpu_count()
 
 
 def train(name):
@@ -57,7 +71,7 @@ def train(name):
            "--dataset.video_backend=pyav",  # AV1 videos: PyAV bundles a decoder; torchcodec uses whatever FFmpeg is installed
            f"--rename_map={json.dumps(runs.CAMERA_NAMES[runs.pretrained(name)])}",
            f"--batch_size={model.get('batch', BATCH)}",
-           "--num_workers=16",  # video decoding feeds the GPU: with LeRobot's default 4 it sat idle 2/3 of the time
+           f"--num_workers={max(4, cores() - 4)}",  # video decoding feeds the GPU: one worker per core the pod may use
            f"--steps={steps}",
            f"--save_freq={model.get('save', SAVE_EVERY)}",
            f"--log_freq={LOG_EVERY}",
@@ -76,7 +90,8 @@ def train(name):
             shutil.rmtree(out)  # LeRobot refuses an existing output folder
         # show the training output and keep it in a log
         with open(log, "w") as f:
-            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            one_thread = {k: "1" for k in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS")}  # per worker: threads sized for 256 cores on a 27-core quota stalled every 16 steps
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env={**os.environ, **one_thread})
             for line in proc.stdout:
                 print(line, end="")
                 f.write(line)
