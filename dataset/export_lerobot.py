@@ -39,6 +39,8 @@ FEATURES = {
                           "names": ["eef_x", "eef_y", "eef_z", "eef_ax", "eef_ay", "eef_az", "finger_l", "finger_r"]},
     "action": {"dtype": "float32", "shape": (7,), "names": ["dx", "dy", "dz", "drx", "dry", "drz", "gripper"]},
 }
+# export(memory=...): not "observation.*", so the policy never reads it; grasp_position.table() does
+MEMORY_FEATURE = {"dtype": "float32", "shape": (3,), "names": ["held", "x", "y"]}
 _to_axisangle = LiberoProcessorStep()._quat2axisangle
 
 
@@ -57,11 +59,13 @@ def result(clip):
     return json.loads(path.read_text()) if path.exists() else {}
 
 
-def export(clips, name=NAME):
+def export(clips, name=NAME, memory=None):
     """Saved robot runs -> LeRobot dataset in dataset/data/lerobot/<name>/ (successful runs only, unless ALL).
 
-    clips -> clip names
-    name  -> dataset folder name
+    clips  -> clip names
+    name   -> dataset folder name
+    memory -> None, or f(clip, actions (T, 7), states (T, 8)) -> (T, 3): a grasp_memory column per frame
+              (smolvla-recoveries/DAgger: short takeover clips carry the grasp memory they can't derive themselves)
     """
     keep = [c for c in clips if ALL or result(c).get("success")]
     skipped = sorted(set(clips) - set(keep), key=episodes.sort_key)
@@ -74,17 +78,23 @@ def export(clips, name=NAME):
     root = episodes.DATA / "lerobot" / name
     if root.exists():
         shutil.rmtree(root)
-    ds = LeRobotDataset.create(f"local/{name}", fps=playback.load(keep[0])["control_hz"], features=FEATURES, root=root, robot_type="panda", use_videos=True, streaming_encoding=True)
+    ds = LeRobotDataset.create(f"local/{name}", fps=playback.load(keep[0])["control_hz"], features=FEATURES if memory is None else {**FEATURES, "grasp_memory": MEMORY_FEATURE}, root=root, robot_type="panda", use_videos=True, streaming_encoding=True)
     env = playback.scene()
     e = env.env
     frames = 0
     for n, clip in enumerate(keep, 1):
         s = playback.load(clip)
         task = f"Water the {s['side']} plant"  # the BDDL command for this plant (sim/watering/bddl.py)
+        rows = []
         for k, action in enumerate(s["action"]):
             # the action was chosen in the state before this step: row k-1, or the start for k = 0
             playback.set_qpos(e, s["qpos_start"] if k == 0 else s["qpos"][k - 1])
-            ds.add_frame({**observe(e), "action": action.astype(np.float32), "task": task})
+            rows.append({**observe(e), "action": action.astype(np.float32), "task": task})
+        if memory is not None:  # needs the whole episode's states first
+            column = memory(clip, s["action"], np.array([r["observation.state"] for r in rows]))
+            rows = [{**r, "grasp_memory": np.asarray(m, np.float32)} for r, m in zip(rows, column)]
+        for r in rows:
+            ds.add_frame(r)
         ds.save_episode()
         frames += len(s["action"])
         print(f"[{n}/{len(keep)}] {clip}: {len(s['action'])} frames, \"{task}\"", flush=True)

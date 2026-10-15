@@ -64,14 +64,21 @@ def table(repo):
     """Grasp slots of every frame of a LeRobot dataset, indexed by its global frame index to use during training
     """
     ds = LeRobotDataset(repo, download_videos=False)
-    t = pq.read_table(ds.root / "data", columns=["index", "episode_index", "observation.state", "action"]).to_pandas()
+    stored = "grasp_memory" in ds.meta.features  # smolvla-recoveries/DAgger: short clips carry it, they can't derive it
+    columns = ["index", "episode_index", "observation.state", "action", *(["grasp_memory"] if stored else [])]
+    t = pq.read_table(ds.root / "data", columns=columns).to_pandas()
     t = t.sort_values("index")
     out = torch.zeros(t["index"].max() + 1, 3)
+    stats = ds.meta.stats["observation.state"]
     for _, ep in t.groupby("episode_index"):
-        state = np.stack(ep["observation.state"].to_numpy())
-        xy = normalize(state[:, :2], ds.meta.stats["observation.state"])
-        closing = np.stack(ep["action"].to_numpy())[:, 6] > 0
-        out[ep["index"].to_numpy()] = torch.from_numpy(grasp_positions(closing, xy, state[:, 6] - state[:, 7]))
+        if stored:  # [held, x, y] in metres -> as below: xy normalized, zeros before the grasp
+            g = np.stack(ep["grasp_memory"].to_numpy())
+            slots = np.c_[g[:, :1], normalize(g[:, 1:], stats) * g[:, :1]].astype(np.float32)
+        else:
+            state = np.stack(ep["observation.state"].to_numpy())
+            closing = np.stack(ep["action"].to_numpy())[:, 6] > 0
+            slots = grasp_positions(closing, normalize(state[:, :2], stats), state[:, 6] - state[:, 7])
+        out[ep["index"].to_numpy()] = torch.from_numpy(slots)
     print(f"grasp slots: {len(t)} frames, {(out[:, 0] > 0).float().mean():.0%} after a grasp", flush=True)
     return out
 
