@@ -75,6 +75,10 @@ MODELS = {
     "libero-4s-dart-full-xxl-sd-rel-b64":   dict(start=LIBERO, k=4, repo="edgarcancinoe/smolvla_water_libero-4s-dart-full-xxl-sd-rel-b64",
                                                data="edgarcancinoe/water_pour_dart_full-xxl", dropout=0.3, batch=64,
                                                script="smolvla-memory/relative-actions/relative.py"),
+    # the same on anchored-pour replays
+    "libero-4s-dart-full-anchor-xl-sd-rel-b64": dict(start=LIBERO, k=4, repo="edgarcancinoe/smolvla_water_libero-4s-dart-full-anchor-xl-sd-rel-b64",
+                                                     data="edgarcancinoe/water_pour_dart_full_anchor-xl", dropout=0.3, batch=64,
+                                                     script="smolvla-memory/relative-actions/relative.py"),
     # + the VLM's keys and values of the first agentview frame, attended to all episode (smolvla-memory/VLM-cache)
     "libero-4s-dart-xl-sd-mem": dict(start=LIBERO, k=4, repo="edgarcancinoe/smolvla_water_libero-4s-dart-xl-sd-mem",
                                      data="edgarcancinoe/water_pour_dart_xl", dropout=0.3,
@@ -83,9 +87,6 @@ MODELS = {
     "libero-4s-dart-xl-sd-memiso": dict(start=LIBERO, k=4, repo="edgarcancinoe/smolvla_water_libero-4s-dart-xl-sd-memiso",
                                         data="edgarcancinoe/water_pour_dart_xl", dropout=0.3,
                                         script="smolvla-memory/VLM-cache-isolated/isolated.py"),
-    # libero-4s, trained further on SHIFTED + the teacher's takeovers from its own rollouts (smolvla-recoveries/DAgger)
-    "libero-4s-dagger1": dict(start="libero-4s", k=4, repo="edgarcancinoe/smolvla_water_libero-4s-dagger1",
-                              data="edgarcancinoe/water_pour_dagger1", steps=8_000),
 }
 
 
