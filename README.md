@@ -146,7 +146,7 @@ The policy was still unreliable over the whole execution: small errors or underc
 | + **State dropout** (30%) | 90% / <ins>80%</ins> | 67% / 37% | 12% / 0% | Relies on vision: grasps at new spots |
 | + **Grasp memory** | 88% / 77% | 75% / 18% | <ins>43%</ins> / 2% | Puts the mug back at trained spots |
 | + DART (full) | 73% / 65% | 48% / <ins>27%</ins> | 32% / 8% | Better pours at new spots |
-| + **DAgger** | **98% / 95%** | **82% / 58%** | **68% / 35%** | Teacher fixes its own mistakes|
+| + **DAgger** | **98%** / **95%** | **82%** / **58%** | **68%** / **35%** | Teacher fixes its own mistakes|
 
 <sub>In / out of distribution (trained / new mug spots), 60 trials each. Inference every 10 control steps. 60s per trial. Untuned SmolVLA-LIBERO: 0% success.</sub>
 
