@@ -1,18 +1,18 @@
-# Smart pouring: 48 phone videos → a robot that waters plants
+# Smart Pouring: teaching a robot to water plants from 48 phone videos of my hands
 
+<p align="center"><b>How far can a handful of phone videos take a robot? And how do we make a VLA remember past information?</b></p>
 
-- **How far can a handful of phone videos take a robot?** 
-- **How do we make a VLA remember past information?**
-
-
-![My pour filmed with a phone, next to the trained policy watering the same plant on its own from a new mug position](docs/media/hero.gif)
-
+<p align="center"><i>Spoiler: the robot learns to grasp the mug and pour... but forgets where it picked the mug up. Two numbers of memory fix that.</i></p>
 
 <p align="center">
   <img src="https://cdn.simpleicons.org/youtube" height="14"> <b><a href="TODO">Video</a></b> &nbsp;&nbsp;|&nbsp;&nbsp;
   <img src="https://cdn.simpleicons.org/huggingface" height="14"> <a href="https://huggingface.co/edgarcancinoe/smolvla_water_libero-4s-dart-full-xxl-sd-rel-b64-dagger1">Best model</a> &nbsp;&nbsp;|&nbsp;&nbsp;
   <img src="https://cdn.simpleicons.org/huggingface" height="14"> <a href="https://huggingface.co/collections/edgarcancinoe/smart-pouring-6ad14d90214376f367e0a6f8">Videos, datasets & results</a> &nbsp;&nbsp;|&nbsp;&nbsp;
   <img src="https://cdn.jsdelivr.net/npm/lucide-static@0.400.0/icons/bar-chart-3.svg" height="14"> <a href="https://edgarcancinoe.github.io/projects/smart_pouring/experiments.html">Experiment tracker</a>
+</p>
+
+<p align="center">
+  <img src="docs/media/hero.gif" width="900" alt="My pour filmed with a phone, next to the trained policy watering the same plant on its own from a new mug position">
 </p>
 
 ## TL;DR
@@ -96,13 +96,15 @@ The simplest implementation struggled to even pick up the mug.
 
 ### [▸] Enabling Memory to SmolVLA
 
-**Problem:** once the mug is lifted, the policy has forgotten where it came from, so it can't put it back.
 
-| Memory | Put back after watering (in distribution) |
-|---|---|
+**Problem:** SmolVLA only sees the present. Once the mug is lifted, it no longer knows where the mug came from, so it can't put it back.
+**Ideas:** Store information about the mug's position, and feed it to the action expert.
+
+| Strategy | Put back after watering (in distribution) |
+|---|:---:|
 | None | `██░░░░░░░░` 15% (5/33) |
 | VLM cache of first frame fed to action expert | `███░░░░░░░` 31% (9/29) |
-| **Include grasp offset in the state**: $(x - x_g,\ y - y_g)$: gripper now minus gripper at the grasp — policy can drive it towards $0$ ! ;) | `██████░░░░` **63% (25/40)** |
+| **Include grasp offset in the state**: $(x - x_g,\ y - y_g)$ — policy can drive it towards $0$ ! ;) | `██████░░░░` **63% (25/40)** |
 
 
 > **Final memory design:** The explicit grasp offset beat a learned image memory. The new state $s$ includes then:
@@ -249,5 +251,5 @@ A part of a name means one ingredient: `libero-4s-dart-full-xxl-sd-rel-b64-dagge
 | `sd` | state dropout (30%) |
 | `rel` · `gp` · `mem` | memory: relative grasp · grasp position · VLM cache |
 | `b64` | batch 64 (else 32) |
-| `dagger1` | + one DAgger round |
+| `dagger1` | + DAgger round |
 
