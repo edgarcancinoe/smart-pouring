@@ -187,6 +187,7 @@ How strict is "put back"? Success counts the mug as put back within **3 cm** of 
 ### Visualization
 
 **Top view of the table and successes for demo and held-out spots**
+
 <sub> 3 seeds × 5 trials × 3 plant commands = 45 trials per spot.</sub> 
 
 
