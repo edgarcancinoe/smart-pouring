@@ -21,7 +21,7 @@
 
 - **Task:** "Water the < *left* / *middle* / *right*> plant" in a custom LIBERO scene (mug + 10 water droplets + 3 pots).
 - **Data:** 48 phone recordings of me pouring (3 plants × 4 mug spots × 4 reps). An ArUco marker on the mug gives its 6-D pose → simulated replays → LeRobot dataset.
-- **Policy:** SmolVLA fine-tuned on those replays + recovery data (DART, DAgger) and grasp memory so it can put the mug bac in its starting position.
+- **Policy:** SmolVLA fine-tuned on those replays + recovery data (DART, DAgger) and grasp memory so it can put the mug back in its starting position.
 - **Results** fine-tuning from the Libero [SmolVLA checkpoint](https://huggingface.co/HuggingFaceVLA/smolvla_libero) (360 trials: 3 seeds, 90 s):
      - **96%** successful grasps (97% trained / 94% new mug spots)
      - **68%** successful watering (70% conditioned on grasping)
@@ -32,7 +32,7 @@
 | Step | The robot must | Success criteria |
 |---|---|---|
 | 1. *Grasp* | pick up the mug from a known or unknown position | the mug rises 3 cm off the table |
-| 2. *Water* | pour into the commanded plant | > 50% of the 10 droplets land in that pot |
+| 2. *Water* | pour into the commanded plant | ≥ 50% of the 10 droplets land in that pot |
 | 3. *Place back* | put the mug back at its **initial position** | mug stands, released, within 3 cm of where it started |
 
 An episode succeeds if all three steps are completed.
@@ -90,7 +90,7 @@ The simplest implementation struggled to even pick up the mug.
 | + **State dropout** (30%) | 845 | `█████████░` **90%** | `█████████░` **80%** | — |
 
 > **Current watering performance**: $\;$ Once grasped, **74%** trained / **46%** new spots (52% of all trials).
-**Current end-to-end success**:  $\quad$ Given watering: **18%** trained, **0%** new (6% overall).
+>**Current end-to-end success**:  $\quad$ Given watering: **18%** trained, **0%** new (6% overall).
 
 
 
@@ -149,7 +149,7 @@ The policy was still unreliable over the whole execution: small errors or underc
 <sub>In / out of distribution (trained / new mug spots), 60 trials each. Inference every 10 control steps. 60s per trial. Untuned SmolVLA-LIBERO: 0% success.</sub>
 
 ### Final evaluation 
-> SmolVLA + Shifted Dataset + Relative Pick-Up Position + DART + DAgger
+> SmolVLA + Shifted Dataset + Relative Pick-Up Position + DART + State Dropout + DAgger
 
 
 
@@ -187,7 +187,7 @@ How strict is "put back"? Success counts the mug as put back within **3 cm** of 
 ### Visualization
 
 **Top view of the table and successes for demo and held-out spots**
-<sub> 3 seeds × 5 trials × 3 plant commands = 45 trials per spot. 
+<sub> 3 seeds × 5 trials × 3 plant commands = 45 trials per spot.</sub> 
 
 
 ![Grasp, water and success per mug start spot for the final model](docs/media/spot_map.png)
@@ -206,7 +206,7 @@ Recovery data mattered most. DAgger gave the biggest single jump to end-to-end s
 - Larger batches: batch 64 beat 32.
 - Longer training: 20k steps beat 15k.
 
-Next steps: **record demos across the whole table instead of 4 fixed spots** (new spots are the weakest), run **more DAgger rounds** (one round took success from 31% to 50% and put-back success is sensible to placement precision); and **tune the training settings** (larger batch sizes seemed to improve performance).
+Next steps: **record demos across the whole table instead of 4 fixed spots** (new spots are the weakest), run **more DAgger rounds** (one round took success from 31% to 50% and put-back success is sensitive to placement precision); and **tune the training settings** (larger batch sizes seemed to improve performance).
 
 ## Run it
 
