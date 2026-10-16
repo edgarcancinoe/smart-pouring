@@ -110,11 +110,12 @@ def spot_map(data):
     over the 3 plant commands x TRIALS -> results/spot_map.png. Recorded starts sit on the +-SHIFT_CM area the
     training data covered; the other spots are new."""
     from matplotlib.colors import LinearSegmentedColormap
-    from matplotlib.patches import Circle, FancyBboxPatch, Patch
+    from matplotlib.patches import Circle, Ellipse, FancyBboxPatch, Patch, RegularPolygon
     from matplotlib.lines import Line2D
 
     cmap = LinearSegmentedColormap.from_list("rate", ["#f3efe6", "#9ccfc4", "#2f8f8a", "#0d3b4c"])
-    ink, mute, table, spread = "#1d2530", "#7b8494", "#faf8f3", "#e6e0d3"
+    ink, mute, table, spread, new = "#1d2530", "#7b8494", "#faf8f3", "#e6e0d3", "#e07b39"
+    pot, soil, leaf = "#c7865a", "#6b4a33", "#7fb069"
     pots = episodes.SETUP["pots"]
     names = [m for m in MAP_MODELS if m in data]
     cols = [("lifted", "Grasp", "mug lifted"), ("watered", "Water", "at least half the droplets in the commanded plant"),
@@ -125,17 +126,24 @@ def spot_map(data):
         for i, (row, name) in enumerate(zip(axes, names)):
             rows = [r for r in data[name] if r["trial"] < TRIALS]
             tr, nw = (sum(r["success"] for r in rows if r["trained_spot"] == t) for t in (True, False))
-            row[0].text(-0.03, 0.5, name.replace("libero-4s-", ""), transform=row[0].transAxes, rotation=90,
-                        ha="right", va="center", fontsize=9.5, weight="bold", color=ink)
-            row[0].text(-0.08, 0.5, f"success {tr} / {nw} of 60", transform=row[0].transAxes, rotation=90,
-                        ha="right", va="center", fontsize=8, color=mute)
+            if len(names) > 1:  # several models: name each row
+                row[0].text(-0.03, 0.5, name.replace("libero-4s-", ""), transform=row[0].transAxes, rotation=90,
+                            ha="right", va="center", fontsize=9.5, weight="bold", color=ink)
+                row[0].text(-0.08, 0.5, f"success {tr} / {nw} of {len(rows) // 2}", transform=row[0].transAxes, rotation=90,
+                            ha="right", va="center", fontsize=8, color=mute)
             for ax, (key, title, sub) in zip(row, cols):
                 ax.add_patch(FancyBboxPatch((-40, 11), 68, 42, boxstyle="round,pad=0,rounding_size=3", fc=table,
                                             ec="#d9d3c5", lw=0.8))
                 for plant in ("left", "middle", "right"):
                     x, y = pots[plant]
-                    ax.add_patch(Circle((x, y), pots["diameter"][plant] / 2, fc="#e4eedc", ec="#93b383", lw=0.9))
-                    ax.text(x, y, plant.upper(), ha="center", va="center", fontsize=6.5, color="#5d7a50",
+                    r = pots["diameter"][plant] / 2
+                    ax.add_patch(Circle((x, y), r, fc=pot, ec="#9c5f3b", lw=0.9))  # pot rim, seen from above
+                    ax.add_patch(Circle((x, y), 0.8 * r, fc=soil, ec="none"))
+                    for a in range(0, 360, 60):  # leaves fanning out from the stem
+                        t = np.radians(a)
+                        ax.add_patch(Ellipse((x + 0.38 * r * np.cos(t), y + 0.38 * r * np.sin(t)), 0.75 * r, 0.3 * r,
+                                             angle=a, fc=leaf, ec="#5d8a46", lw=0.6))
+                    ax.text(x, y - r - 1.6, plant.upper(), ha="center", va="center", fontsize=6.5, color="#5d7a50",
                             weight="bold")
                 for spot in sorted({r["spot"] for r in rows}):
                     sub_rows = [r for r in rows if r["spot"] == spot]
@@ -144,8 +152,8 @@ def spot_map(data):
                     if trained:
                         ax.add_patch(FancyBboxPatch((x - SHIFT_CM, y - SHIFT_CM), 2 * SHIFT_CM, 2 * SHIFT_CM,
                                                     boxstyle="round,pad=0,rounding_size=1.2", fc=spread, ec="none"))
-                    ax.add_patch(Circle((x, y), 2.3, fc=cmap(k / n), ec=ink if trained else mute, lw=1.1,
-                                        ls="-" if trained else (0, (2, 1.5))))
+                    ax.add_patch(Circle((x, y), 2.3, fc=cmap(k / n), ec=ink, lw=1.1) if trained else
+                                 RegularPolygon((x, y), 4, radius=3.0, fc=cmap(k / n), ec=new, lw=1.8))  # new: orange diamond
                     ax.text(x, y, k, ha="center", va="center", fontsize=7.5, weight="bold",
                             color="white" if k / n > 0.55 else ink)
                 ax.set_xlim(-41, 29)
@@ -160,12 +168,11 @@ def spot_map(data):
         cb.set_ticks([0, 0.5, 1], labels=["0", "50%", f"all {TRIALS * 3}"])
         cb.outline.set_visible(False)
         cax.tick_params(length=0, labelsize=7.5, colors=mute)
-        cax.set_title("trials per spot (3 plants x 5)", fontsize=7.5, color=mute, loc="left")
+        cax.set_title(f"trials per spot (3 plants x {TRIALS})", fontsize=7.5, color=mute, loc="left")
         fig.legend(handles=[Line2D([], [], marker="o", ls="", mfc="white", mec=ink, ms=9, label="recorded start"),
-                            Patch(fc=spread, label=f"training spread (±{SHIFT_CM:g} cm)"),
-                            Line2D([], [], marker="o", ls="", mfc="white", mec=mute, ms=9, label="new spot",
-                                   markeredgewidth=1, fillstyle="full"),
-                            Patch(fc="#e4eedc", ec="#93b383", label="plant")],
+                            Line2D([], [], marker="D", ls="", mfc="white", mec=new, ms=8, label="new spot",
+                                   markeredgewidth=1.8),
+                            Line2D([], [], marker="o", ls="", mfc=leaf, mec=pot, ms=9, markeredgewidth=2, label="plant")],
                    loc="lower left", bbox_to_anchor=(0.12, 0.012), ncol=4, frameon=False, fontsize=7.5,
                    labelcolor=mute, handletextpad=0.4, columnspacing=1.2)
         fig.savefig(RESULTS / "spot_map.png", dpi=200, bbox_inches="tight", facecolor="white")

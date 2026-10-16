@@ -7,7 +7,13 @@
 
 ![My pour filmed with a phone, next to the trained policy watering the same plant on its own from a new mug position](docs/media/hero.gif)
 
-▶️ **[Video walkthrough (TODO min)](TODO)** · 📹 [Raw videos](https://huggingface.co/datasets/edgarcancinoe/water_pour_videos) · 📦 [Dataset](https://huggingface.co/datasets/edgarcancinoe/water_pour) · 🤖 [Best model](https://huggingface.co/edgarcancinoe/smolvla_water_libero-4s-dart-full-xxl-sd-rel-b64-dagger1) · 🗂️ [Collection](https://huggingface.co/collections/edgarcancinoe/smart-pouring-6ad14d90214376f367e0a6f8) · 📓 [Journal](JOURNAL.md) · 📊 [Experiment tracker](TODO-public-link)
+
+<p align="center">
+  <img src="https://cdn.simpleicons.org/youtube" height="14"> <b><a href="TODO">Video</a></b> &nbsp;&nbsp;|&nbsp;&nbsp;
+  <img src="https://cdn.simpleicons.org/huggingface" height="14"> <a href="https://huggingface.co/edgarcancinoe/smolvla_water_libero-4s-dart-full-xxl-sd-rel-b64-dagger1">Best model</a> &nbsp;&nbsp;|&nbsp;&nbsp;
+  <img src="https://cdn.simpleicons.org/huggingface" height="14"> <a href="https://huggingface.co/collections/edgarcancinoe/smart-pouring-6ad14d90214376f367e0a6f8">Videos, datasets & results</a> &nbsp;&nbsp;|&nbsp;&nbsp;
+  <img src="https://cdn.jsdelivr.net/npm/lucide-static@0.400.0/icons/bar-chart-3.svg" height="14"> <a href="https://edgarcancinoe.github.io/projects/smart_pouring/experiments.html">Experiment tracker</a>
+</p>
 
 ## TL;DR
 
@@ -16,10 +22,10 @@
 - **Task:** "Water the < *left* / *middle* / *right*> plant" in a custom LIBERO scene (mug + 10 water droplets + 3 pots).
 - **Data:** 48 phone recordings of me pouring (3 plants × 4 mug spots × 4 reps). An ArUco marker on the mug gives its 6-D pose → simulated replays → LeRobot dataset.
 - **Policy:** SmolVLA fine-tuned on those replays + recovery data (DART, DAgger) and grasp memory so it can put the mug bac in its starting position.
-- **Results** fine-tuning from the Libero [SmolVLA checkpoint](XXX):
-     - **xx%** successful grasps (in and out of training distirbution)
-     - **xx%** successful watering (xx% success conditioned on grasping)
-     - **xx%** end-to-end success (x% success conditioned on watering)
+- **Results** fine-tuning from the Libero [SmolVLA checkpoint](https://huggingface.co/HuggingFaceVLA/smolvla_libero) (360 trials: 3 seeds, 90 s):
+     - **96%** successful grasps (97% trained / 94% new mug spots)
+     - **68%** successful watering (70% conditioned on grasping)
+     - **50%** end-to-end success (74% conditioned on watering)
 
 ## The task
 
@@ -30,6 +36,14 @@
 | 3. *Place back* | put the mug back at its **initial position** | mug stands, released, within 3 cm of where it started |
 
 An episode succeeds if all three steps are completed.
+
+**Pot spots:**
+The pots stay fixed; only the mug moves.
+
+**Mug spots:**
+Recorded pours from **4 mug spots** (3 plants × 4 spots × 4 repetitions = 48 videos). To test spatial generalization, evaluation adds **4 new spots**, 7–10 cm away from the training spots. 
+
+The map in [Visualization](#visualization) shows all spots and the final model's performance.
 
 <!-- One figure of the scene from agentview, pots + 8 mug spots labelled (1–4 trained, 5–8 new). -->
 ![The Panda watering the left, middle and right plant from three different mug positions](docs/media/task.gif)
@@ -84,57 +98,113 @@ The simplest implementation struggled to even pick up the mug.
 
 **Problem:** once the mug is lifted, the policy has forgotten where it came from, so it can't put it back.
 
-| Memory | Put back (in distribution) |
+| Memory | Put back after watering (in distribution) |
 |---|---|
-| None | `█░░░░░░░░░` 5/60 |
-| VLM cache of first frame fed to action expert | `██░░░░░░░░` 9/60 |
-| **Include grasp offset in the state**: $(x - x_g,\ y - y_g)$ -- policy can drive it to $0$! ;) | `████░░░░░░` **25/60** |
+| None | `██░░░░░░░░` 15% (5/33) |
+| VLM cache of first frame fed to action expert | `███░░░░░░░` 31% (9/29) |
+| **Include grasp offset in the state**: $(x - x_g,\ y - y_g)$: gripper now minus gripper at the grasp — policy can drive it towards $0$ ! ;) | `██████░░░░` **63% (25/40)** |
 
-> **Takeaway:** An explicit grasp offset (which converges to 0 in put-back) beats a learned image memory.
+
+> **Final memory design:** The explicit grasp offset beat a learned image memory. The new state $s$ includes then:
+>- Position relative to a detected grasp spot: $\quad \quad \quad \quad x-x_g,\;\;\; y-y_g$ 
+>- Flag that switches to $1$ once the grasp is detected: $\quad h \in \{0,1\}$
+>
+> **Final state representation**
+>$$s = [\;\underbrace{x,\ y,\ z}_{\text{gripper position}},\quad \underbrace{r_x,\ r_y,\ r_z}_{\text{gripper rotation}},\quad \underbrace{f_1,\ f_2}_{\text{fingers}},\quad \underbrace{h,\ x - x_g,\ y - y_g}_{\text{grasp memory}}\;]$$
+
+
 
 ### [▸] Making executions more robust: Recovering from errors
 
+The policy was still unreliable over the whole execution: small errors or underconfident behavior after the grasp would make the pour or put-back fail. Two additions, applied one after the other, made it robust to these errors:
 
-As with grasping, DART noise is added to the **whole execution** (reach, carry, pour and put-back), fading to zero at the pour position so the water still lands in the plant.
+1. **DART on the whole execution:** as with grasping, the hand is pushed off its path during replays, now also during the carry, pour and put-back. The clean, correcting action is recorded.
 
-Following the spirit of **HG-DAgger**, the trained policy is then rolled out in simulation. Whenever it drifts from the closest demonstration, a **teacher** takes over and steers it back. These takeovers are recorded and used to post-train the policy.
+2. **[HG-DAgger](https://arxiv.org/abs/1810.02890):** the trained policy is rolled out in simulation. Whenever it drifts more than 1–2 cm from the demo's path, a **teacher** (scripted) takes over and steers it back. The takeovers are recorded and used to post-train the policy.
 
-## 3. Final Results
+---
 
-```
-SmolVLA + Shifted Dataset + Relative Pick-Up Position + DART + DAgger
-```
-| Shifted mug | State dropout | DART | Grasp memory | DAgger | Grasp | Water | Success |
-|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| | | | | | 27% / 15% | 0% / 0% | 0% / 0% |
-| ✓ | | | | | 82% / 60% | 40% / 12% | 0% / 0% |
-| ✓ | ✓ | | | | 73% / 50% | 33% / 17% | 5% / 0% |
-| ✓ | ✓ | reach | | | 82% / 73% | 55% / 28% | 8% / 0% |
-| ✓ | ✓ | reach | ✓ | | 78% / 75% | 67% / 17% | 42% / 2% |
-| ✓ | ✓ | full | ✓ | | 78% / 63% | 60% / 27% | 42% / 12% |
-| ✓ | ✓ | full | ✓ | ✓ | **98% / 95%** | **82% / 58%** | **68% / 35%** |
+## 3. Results
 
-<sub>In / out of distribution (trained / new mug spots), 60 trials each. The policy re-plans every 10 control steps (0.5 s); 60 s per trial. Untuned SmolVLA-LIBERO: 0% success.</sub>
-
-> **How each model is evaluated:** $\;$ 3 plants × 8 mug spots (4 recorded, 4 new, 7–10 cm away) × 5 trials = 120 trials, the mug placed within ±1 cm of its spot. Every model gets the same trials (fixed seeds).
-> **Settings:** $\qquad\qquad\qquad\quad\;\;$ `N_ACTION_STEPS=10` (re-plan every 0.5 s), `MAX_STEPS=1200` (60 s) and `SEED=0` by default. Each is an environment variable for `./run eval`, and each setting writes to its own `results/` folder.
+> **Evaluation setup**
+> - **Trials:** $\quad\;\;\,$ 3 plants × 8 mug spots × 5 = 120 per model. Spots 1–4 are in the demos; spots 5–8 are new.
+> - **Each trial:** $\,$ Mug placed within ±1 cm of its spot, robot in start pose, one command ("Water the *selected* plant").
+> - **Policy:** $\quad\;\,$ Predicts 50 actions, runs 10 (0.5 s), then looks again.
+> - **Ends:** $\quad\;\;\;$ When the mug rests released, or after `MAX_STEPS = 1200 | 1800` (experiments | headline)
+> - **Fairness:** $\;\,$ Every model gets the same trials (`SEED=0`). Headline numbers: 3 seeds = 360 trials.
 
 
+| Method | Grasp | Water | Success | Comments |
+|---|:---:|:---:|:---:| :--- |
+| SmolVLA on raw replays | 27% / 15% | 0% / 0% | 0% / 0% | *Memorizes* the 4 mug spots|
+| + **Shifted mug** (±3 cm) | 75% / 68% | 42% / 15% | 12% / 0% | Finds the mug, poor recovery from errors |
+| + **DART**, on the reach | 85% / 65% | 60% / 27% | 8% / 0% | *Recovers* on the way to the mug |
+| + **State dropout** (30%) | 90% / <ins>80%</ins> | 67% / 37% | 12% / 0% | Relies on vision: grasping at new spots |
+| + **Grasp memory** (relative) | 88% / 77% | 75% / 18% | <ins>43%</ins> / 2% | Puts the mug back at trained spots |
+| + DART on the **whole task** | 73% / 65% | 48% / <ins>27%</ins> | 32% / 8% | Better pours at new spots |
+| + **DAgger** | **98% / 95%** | **82% / 58%** | **68% / 35%** | Teacher fixes its own mistakes|
 
-# So... from 48 phone recordings:
-- The robot picks up the mug almost every time
-- Waters the commanded plant in **TODO** of trials
-- Puts the mug back in **TODO**
+<sub>In / out of distribution (trained / new mug spots), 60 trials each. Inference every 10 control steps. 60s per trial. Untuned SmolVLA-LIBERO: 0% success.</sub>
+
+### Final evaluation 
+> SmolVLA + Shifted Dataset + Relative Pick-Up Position + DART + DAgger
 
 
 
-![Grasp, water and success per mug start spot]() **TODO**
 
-#### Visualization
+<h3 align="center">96% grasp · 68% watered · 50% end-to-end success</h3>
+<p align="center"><sub>Final model · 3 seeds × 120 trials · 90 s per trial · untuned SmolVLA: 0%</sub></p>
+
+
+
+###### From 48 phone recordings...
+- The robot picks up the mug almost every time (**96%**)
+- Waters the commanded plant in **68%** of trials
+- Puts the mug back in **50%** of all
+
+<br>
+
+$$P(\text{success}) = \underbrace{P(\text{grasp})}_{96\%\ (345/360)} \cdot \underbrace{P(\text{water} \mid \text{grasp})}_{70\%\ (243/345)} \cdot \underbrace{P(\text{put back} \mid \text{water})}_{74\%\ (181/243)} = 50\%$$
+
+<br>
+
+How strict is "put back"? Success counts the mug as put back within **3 cm** of where it started. Relaxing that:
+
+| Put back within | Trained spots | New spots | All |
+|---|:---:|:---:|:---:|
+| 2 cm | 59% | 24% | 42% |
+| **3 cm** | **68%** | **33%** | **50%** |
+| 4 cm | 72% | 41% | 56% |
+| 5 cm | 72% | 43% | 58% |
+
+<sub>Final model, 3 seeds × 120 trials, 90 s. Watering and the mug standing upright are still required.</sub>
+
+
+---
+
+### Visualization
+
+**Top view of the table and successes for demo and held-out spots**
+<sub> 3 seeds × 5 trials × 3 plant commands = 45 trials per spot. 
+
+
+![Grasp, water and success per mug start spot for the final model](docs/media/spot_map.png)
+
+
+##### Policy execution
 
 <!-- 3–6 GIFs, one per plant, at least one at a new spot. Short (<5 s), small (<3 MB each). -->
 
 ![Ten successful rollouts of the best policy from trained and new mug spots, and five typical failures](docs/media/rollouts.gif)
+
+## Thoughts on improving:
+Recovery data mattered most. DAgger gave the biggest single jump to end-to-end success, and new-spot success doubled (improved generalization). The experiments also point to cheaper gains:
+
+- More recovery data: 32 DART runs per recording beat 16.
+- Larger batches: batch 64 beat 32.
+- Longer training: 20k steps beat 15k.
+
+Next steps: **record demos across the whole table instead of 4 fixed spots** (new spots are the weakest), run **more DAgger rounds** (one round took success from 31% to 50% and put-back success is sensible to placement precision); and **tune the training settings** (larger batch sizes seemed to improve performance).
 
 ## Run it
 
@@ -148,11 +218,11 @@ uv sync
 | Phone video → robot runs | `./run track` · `./run robot` · `./run export` | Mac |
 | Recovery data | `./run dart` · `./run dagger` | CPU |
 | Train | `./run train <model>` | GPU |
-| Evaluate | `./run relative-eval <model> --jobs 8` | GPU + CPU |
+| Evaluate | `./run relative-eval <model> --jobs 8` | GPU |
 | Compare | `./run compare` | Mac |
 | Watch a policy | `./run eval-watch` | Mac |
 
-The processed datasets and every model are on the [Hub](https://huggingface.co/edgarcancinoe). The raw phone videos (48 recordings + lens calibration) are on the Hub too: [water_pour_videos](https://huggingface.co/datasets/edgarcancinoe/water_pour_videos).
+The raw phone videos, processed datasets and every model are on the [Hub](https://huggingface.co/edgarcancinoe).
 
 ## Repo map
 
@@ -163,11 +233,11 @@ The processed datasets and every model are on the [Hub](https://huggingface.co/e
 | [`smolvla-finetune/`](smolvla-finetune/README.md) | training, eval protocol, plots |
 | `smolvla-recoveries/` | [DART](smolvla-recoveries/DART/README.md) · [DAgger](smolvla-recoveries/DAgger/README.md) |
 | `smolvla-memory/` | [grasp position](smolvla-memory/grasp-position/README.md) · [relative](smolvla-memory/relative-actions/README.md) · [VLM cache](smolvla-memory/VLM-cache/README.md) |
-| [`JOURNAL.md`](JOURNAL.md) | day-by-day log, every dead end |
+
 
 ### Model names
 
-Each part of a name is one ingredient, e.g. `libero-4s-dart-full-xxl-sd-rel-b64-dagger1`:
+A part of a name means one ingredient: `libero-4s-dart-full-xxl-sd-rel-b64-dagger1`.
 
 | Part | Meaning |
 |---|---|
@@ -180,4 +250,4 @@ Each part of a name is one ingredient, e.g. `libero-4s-dart-full-xxl-sd-rel-b64-
 | `rel` · `gp` · `mem` | memory: relative grasp · grasp position · VLM cache |
 | `b64` | batch 64 (else 32) |
 | `dagger1` | + one DAgger round |
-| `@15000` | the checkpoint at step 15k |
+
