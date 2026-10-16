@@ -12,7 +12,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/media/hero.gif" width="900" alt="My pour filmed with a phone, next to the trained policy watering the same plant on its own from a new mug position">
+  <img src="docs/media/hero.gif" width="720" alt="My pour filmed with a phone, next to the trained policy watering the same plant on its own from a new mug position">
 </p>
 
 ## TL;DR
@@ -62,14 +62,14 @@ video ─▶ mug pose ─▶ robot grabs + follows the path ─▶ LeRobot datas
 |---|---|
 | Track | ChArUco (camera pose) + ArUco on mug → $(x, y, z, q)$ per frame |
 | Robot replay | grasp the mug, then the hand follows the tracked mug path at a fixed grip |
-| [Export](https://huggingface.co/datasets/edgarcancinoe/water_pour) | 20 fps · 2 views · $s = [\;x, y, z, \;\;r_x, r_y, r_z, \;\; f_1, f_2\;]$ · $a = [\Delta x, \Delta y, \Delta z, \Delta r_x, \Delta r_y, \Delta r_z, g]$ |
+| [Export](https://huggingface.co/datasets/edgarcancinoe/water_pour) | 20 fps · 2 views · $s = [x, y, z, r_x, r_y, r_z, f_1, f_2]$ · $a = [\Delta x, \Delta y, \Delta z, \Delta r_x, \Delta r_y, \Delta r_z, g]$ |
 
 ![My pour filmed with a phone and its tracked mug pose, the mug replaying it alone in simulation, and the Panda replaying it holding the mug](docs/media/phone_to_robot.gif)
 
 Human data gives pouring trajectory. Reach and release are scripted.
 
-> **Main challenge:** $\;\;$ Pours tilt the mug past the arm joint limits.
-> **Solution:** $\quad\qquad\;$ For each clip, pick the flattest hand tilt (35° → 40° → 50° below horizontal) that keeps joints under their limits.
+> **Main challenge:** Pours tilt the mug past the arm joint limits.\
+> **Solution:** For each clip, pick the flattest hand tilt (35° → 40° → 50° below horizontal) that keeps joints under their limits.
 
 > **Final base dataset: 47/48 replays that succeed**
 > 
@@ -89,8 +89,8 @@ The simplest implementation struggled to even pick up the mug.
 | + **DART** recoveries | 845 | `█████████░` 85% | `███████░░░` 65% | Higher success at trained spots |
 | + **State dropout** (30%) | 845 | `█████████░` **90%** | `█████████░` **80%** | — |
 
-> **Current watering performance**: $\;$ Once grasped, **74%** trained / **46%** new spots (52% of all trials).
->**Current end-to-end success**:  $\quad$ Given watering: **18%** trained, **0%** new (6% overall).
+> **Current watering performance**: Once grasped, **74%** trained / **46%** new spots (52% of all trials).\
+> **Current end-to-end success**: Given watering: **18%** trained, **0%** new (6% overall).
 
 
 
@@ -104,15 +104,17 @@ The simplest implementation struggled to even pick up the mug.
 |---|:---:|
 | None | `██░░░░░░░░` 15% (5/33) |
 | VLM cache of first frame fed to action expert | `███░░░░░░░` 31% (9/29) |
-| **Include grasp offset in the state**: $(x - x_g,\ y - y_g)$ — policy can drive it towards $0$ ! ;) | `██████░░░░` **63% (25/40)** |
+| **Include grasp offset in the state**: $(x - x_g, y - y_g)$ — policy can drive it towards $0$ ! ;) | `██████░░░░` **63% (25/40)** |
 
 
 > **Final memory design:** The explicit grasp offset beat a learned image memory. The new state $s$ includes then:
->- Position relative to a detected grasp spot: $\quad \quad \quad \quad x-x_g,\;\;\; y-y_g$ 
->- Flag that switches to $1$ once the grasp is detected: $\quad h \in \{0,1\}$
+>- Position relative to a detected grasp spot: $x - x_g$, $y - y_g$
+>- Flag that switches to $1$ once the grasp is detected: $h \in \lbrace 0, 1 \rbrace$
 >
 > **Final state representation**
->$$s = [\;\underbrace{x,\ y,\ z}_{\text{gripper position}},\quad \underbrace{r_x,\ r_y,\ r_z}_{\text{gripper rotation}},\quad \underbrace{f_1,\ f_2}_{\text{fingers}},\quad \underbrace{h,\ x - x_g,\ y - y_g}_{\text{grasp memory}}\;]$$
+> ```math
+> s = [\;\underbrace{x,\ y,\ z}_{\text{gripper position}},\quad \underbrace{r_x,\ r_y,\ r_z}_{\text{gripper rotation}},\quad \underbrace{f_1,\ f_2}_{\text{fingers}},\quad \underbrace{h,\ x - x_g,\ y - y_g}_{\text{grasp memory}}\;]
+> ```
 
 
 
@@ -129,11 +131,11 @@ The policy was still unreliable over the whole execution: small errors or underc
 ## 3. Results
 
 > **Evaluation setup**
-> - **Trials:** $\quad\;\;\,$ 3 plants × 8 mug spots × 5 = 120 per model. Spots 1–4 are in the demos; spots 5–8 are new.
-> - **Each trial:** $\,$ Mug placed within ±1 cm of its spot, robot in start pose, one command ("Water the *selected* plant").
-> - **Policy:** $\quad\;\,$ Predicts 50 actions, runs 10 (0.5 s), then looks again.
-> - **Ends:** $\quad\;\;\;$ When the mug rests released, or after `MAX_STEPS = 1200 | 1800` (experiments | headline)
-> - **Fairness:** $\;\,$ Every model gets the same trials (`SEED=0`). Headline numbers: 3 seeds = 360 trials.
+> - **Trials:** 3 plants × 8 mug spots × 5 = 120 per model. Spots 1–4 are in the demos; spots 5–8 are new.
+> - **Each trial:** Mug placed within ±1 cm of its spot, robot in start pose, one command ("Water the *selected* plant").
+> - **Policy:** Predicts 50 actions, runs 10 (0.5 s), then looks again.
+> - **Ends:** When the mug rests released, or after `MAX_STEPS = 1200 | 1800` (experiments | headline)
+> - **Fairness:** Every model gets the same trials (`SEED=0`). Headline numbers: 3 seeds = 360 trials.
 
 
 | Method | Grasp | Water | Success | Comments |
@@ -166,7 +168,9 @@ The policy was still unreliable over the whole execution: small errors or underc
 
 <br>
 
-$$P(\text{success}) = \underbrace{P(\text{grasp})}_{96\%\ (345/360)} \cdot \underbrace{P(\text{water} \mid \text{grasp})}_{70\%\ (243/345)} \cdot \underbrace{P(\text{put back} \mid \text{water})}_{74\%\ (181/243)} = 50\%$$
+```math
+P(\text{success}) = \underbrace{P(\text{grasp})}_{96\%\ (345/360)} \cdot \underbrace{P(\text{water} \mid \text{grasp})}_{70\%\ (243/345)} \cdot \underbrace{P(\text{put back} \mid \text{water})}_{74\%\ (181/243)} = 50\%
+```
 
 <br>
 
