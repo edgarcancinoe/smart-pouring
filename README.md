@@ -141,11 +141,11 @@ The policy was still unreliable over the whole execution: small errors or underc
 | Method | Grasp | Water | Success | Comments |
 |---|:---:|:---:|:---:| :--- |
 | SmolVLA on raw replays | 27% / 15% | 0% / 0% | 0% / 0% | *Memorizes* the 4 mug spots|
-| + **Shifted mug** (±3 cm) | 75% / 68% | 42% / 15% | 12% / 0% | Finds the mug, poor recovery from errors |
-| + **DART**, on the reach | 85% / 65% | 60% / 27% | 8% / 0% | *Recovers* on the way to the mug |
-| + **State dropout** (30%) | 90% / <ins>80%</ins> | 67% / 37% | 12% / 0% | Relies on vision: grasping at new spots |
-| + **Grasp memory** (relative) | 88% / 77% | 75% / 18% | <ins>43%</ins> / 2% | Puts the mug back at trained spots |
-| + DART on the **whole task** | 73% / 65% | 48% / <ins>27%</ins> | 32% / 8% | Better pours at new spots |
+| + **Shifted mug** (±3 cm) | 75% / 68% | 42% / 15% | 12% / 0% | Finds the mug, poor recoveries |
+| + **DART** (reach) | 85% / 65% | 60% / 27% | 8% / 0% | *Recovers* on the way to the mug |
+| + **State dropout** (30%) | 90% / <ins>80%</ins> | 67% / 37% | 12% / 0% | Relies on vision: grasps at new spots |
+| + **Grasp memory** | 88% / 77% | 75% / 18% | <ins>43%</ins> / 2% | Puts the mug back at trained spots |
+| + DART (full) | 73% / 65% | 48% / <ins>27%</ins> | 32% / 8% | Better pours at new spots |
 | + **DAgger** | **98% / 95%** | **82% / 58%** | **68% / 35%** | Teacher fixes its own mistakes|
 
 <sub>In / out of distribution (trained / new mug spots), 60 trials each. Inference every 10 control steps. 60s per trial. Untuned SmolVLA-LIBERO: 0% success.</sub>
