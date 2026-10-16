@@ -5,7 +5,7 @@
 <p align="center"><i>Spoiler: the robot learns to grasp the mug and pour... but forgets where it picked the mug up. Two numbers of memory fix that.</i></p>
 
 <p align="center">
-  <img src="https://cdn.simpleicons.org/youtube" height="14"> <b><a href="TODO">Video</a></b> &nbsp;&nbsp;|&nbsp;&nbsp;
+  <img src="https://cdn.simpleicons.org/youtube" height="14"> <b><a href="TODO">Video (TODO)</a></b> &nbsp;&nbsp;|&nbsp;&nbsp;
   <img src="https://cdn.simpleicons.org/huggingface" height="14"> <a href="https://huggingface.co/edgarcancinoe/smolvla_water_libero-4s-dart-full-xxl-sd-rel-b64-dagger1">Best model</a> &nbsp;&nbsp;|&nbsp;&nbsp;
   <img src="https://cdn.simpleicons.org/huggingface" height="14"> <a href="https://huggingface.co/collections/edgarcancinoe/smart-pouring-6ad14d90214376f367e0a6f8">Videos, datasets & results</a> &nbsp;&nbsp;|&nbsp;&nbsp;
   <img src="https://cdn.jsdelivr.net/npm/lucide-static@0.400.0/icons/bar-chart-3.svg" height="14"> <a href="https://edgarcancinoe.github.io/projects/smart_pouring/experiments.html">Experiment tracker</a>
