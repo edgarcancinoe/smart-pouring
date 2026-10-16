@@ -139,7 +139,7 @@ The policy was still unreliable over the whole execution: small errors or underc
 
 
 | Method | Grasp | Water | Success | Comments |
-|---|:---:|:---:|:---:| :--- |
+|---|---|---|---|---|
 | SmolVLA on raw replays | 27% / 15% | 0% / 0% | 0% / 0% | *Memorizes* the 4 mug spots|
 | + **Shifted mug** (±3 cm) | 75% / 68% | 42% / 15% | 12% / 0% | Finds the mug, poor recoveries |
 | + **DART** (reach) | 85% / 65% | 60% / 27% | 8% / 0% | *Recovers* on the way to the mug |
