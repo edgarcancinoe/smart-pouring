@@ -102,6 +102,11 @@ MODELS = {
                                                         repo="edgarcancinoe/smolvla_water_libero-4s-dart-full-xxl-sd-rel-b64-dagger12",
                                                         data="edgarcancinoe/water_pour_dagger12", dropout=0.3, batch=64, steps=8_000,
                                                         script="smolvla-memory/relative-actions/relative.py"),
+    # the same, 12k steps: dagger1's passes over the data (1228 episodes vs 844)
+    "libero-4s-dart-full-xxl-sd-rel-b64-dagger12-12k": dict(start="libero-4s-dart-full-xxl-sd-rel-b64", k=4,
+                                                            repo="edgarcancinoe/smolvla_water_libero-4s-dart-full-xxl-sd-rel-b64-dagger12-12k",
+                                                            data="edgarcancinoe/water_pour_dagger12", dropout=0.3, batch=64, steps=12_000,
+                                                            script="smolvla-memory/relative-actions/relative.py"),
     # anchor-xl-rel-b64 dagger
     "libero-4s-dart-full-anchor-xl-sd-rel-b64-dagger1": dict(start="libero-4s-dart-full-anchor-xl-sd-rel-b64", k=4,
                                                              repo="edgarcancinoe/smolvla_water_libero-4s-dart-full-anchor-xl-sd-rel-b64-dagger1",
