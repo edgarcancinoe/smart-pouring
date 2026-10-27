@@ -3,12 +3,17 @@
 Usage: ./run dagger [--jobs 8]         rollouts of POLICY for round ROUND
        ./run dagger-check [--jobs 8]   the teacher alone, from pushed-off starts: must water and put back ~every time
        ./run dagger-export             the demos + every takeover up to ROUND -> dataset (with grasp_memory) -> Hub
+       ./run dagger-merge              the Hub datasets in MERGE -> one dataset (every round's takeovers) -> Hub
 """
 import argparse
 import json
+import shutil
+from pathlib import Path
 
 import numpy as np
-from lerobot.datasets import LeRobotDatasetMetadata
+from huggingface_hub import hf_hub_download
+from lerobot.datasets import LeRobotDataset, LeRobotDatasetMetadata
+from lerobot.datasets.dataset_tools import merge_datasets
 
 import eval_relative  # noqa: F401 (at import: evaluate's scene, reset and load_model keep the grasp memory)
 import eval_grasp_position as egp
@@ -39,6 +44,8 @@ MIN_TAKEOVER = 10                   # control steps a takeover lasts at least (n
 CHECK_PUSH_CM = 3.0                 # dagger-check: how far the hand wanders off the start pose before the teacher drives, cm
 CHECK_PUSH_STEPS = 40               # ... over this many control steps
 NAME = f"water_pour_dagger{ROUND}"  # local dataset folder (dataset/data/lerobot/<NAME>)
+MERGE = ("water_pour_dagger1", f"water_pour_dagger{ROUND}")  # dagger-merge: these Hub datasets (their takeovers survive only there) ...
+MERGED = "libero-4s-dart-full-xxl-sd-rel-b64-dagger12"  # ... -> this model's "data" (runs.MODELS)
 OUT = episodes.DATA / "dagger"  # the xxl run's takeovers, every round (the anchor run's are in dagger-anchor/)
 
 
@@ -191,12 +198,29 @@ def dagger_clips():
                   and len(np.load(d / "grasp_memory.npy")) >= 2)  # a takeover begun on the rollout's last step has 1 frame: LeRobot can't make its video stats
 
 
+def merge():
+    """The datasets in MERGE -> one (both carry the demos: runs.pick keeps each clip once) -> Hub."""
+    repo = runs.MODELS[MERGED]["data"]
+    root = episodes.DATA / "lerobot" / repo.split("/")[1]
+    shutil.rmtree(root, ignore_errors=True)
+    sets = [LeRobotDataset(f"edgarcancinoe/{n}") for n in MERGE]
+    merge_datasets(sets, repo, root)
+    clips = [c for ds in sets for c in json.loads(Path(hf_hub_download(ds.repo_id, "meta/clips.json", repo_type="dataset")).read_text())]
+    assert len(clips) == sum(ds.num_episodes for ds in sets)
+    (root / "meta" / "clips.json").write_text(json.dumps(clips))
+    upload(root.name, repo)
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--jobs", type=int, default=0, help="rollouts run in parallel (default: up to half the CPU cores)")
     p.add_argument("--check", action="store_true", help="the teacher alone (passed by ./run dagger-check)")
     p.add_argument("--export", action="store_true", help="export + upload (passed by ./run dagger-export)")
+    p.add_argument("--merge", action="store_true", help="merge + upload (passed by ./run dagger-merge)")
     args = p.parse_args()
+
+    if args.merge:
+        return merge()
 
     if args.export:
         demos = [c for c in playback.saved() if (p := episodes.parse(c)) and (WITH_DART or not p["dart"])]  # takeovers: dagger_clips()

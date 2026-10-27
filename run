@@ -25,6 +25,7 @@
 #   ./run dagger-check [--jobs 8]           takeover DAgger: the teacher alone must water + put back from pushed-off starts
 #   ./run dagger       [--jobs 8]           the policy waters, the teacher takes over when it drifts: takeovers saved
 #   ./run dagger-export                     demos + takeovers -> DAgger dataset -> Hugging Face Hub (then ./run train <its model>)
+#   ./run dagger-merge                      every round's DAgger dataset -> one dataset -> Hub
 
 #  memory (smolvla-memory/): models train with ./run train <model>
 #   ./run grasp-pos-eval [model ...] [--jobs 8]   grasp-position models in the sim (as ./run eval)
@@ -63,11 +64,12 @@ case "$cmd" in
   dagger)        PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions MUJOCO_GL=$gl exec $py smolvla-recoveries/DAgger/dagger.py "$@" ;;
   dagger-check)  PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions MUJOCO_GL=$gl exec $py smolvla-recoveries/DAgger/dagger.py --check "$@" ;;
   dagger-export) PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions MUJOCO_GL=$gl exec $py smolvla-recoveries/DAgger/dagger.py --export ;;
+  dagger-merge)  PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions MUJOCO_GL=$gl exec $py smolvla-recoveries/DAgger/dagger.py --merge ;;
   grasp-pos-eval) PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position MUJOCO_GL=$gl exec $py smolvla-memory/grasp-position/eval_grasp_position.py "$@" ;;
   relative-eval)  PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions MUJOCO_GL=$gl exec $py smolvla-memory/relative-actions/eval_relative.py "$@" ;;
   memory-eval)    PYTHONPATH=.:smolvla-finetune:smolvla-memory/VLM-cache MUJOCO_GL=$gl exec $py smolvla-memory/VLM-cache/eval_memory.py "$@" ;;
   memory-check)   PYTHONPATH=.:smolvla-finetune:smolvla-memory/VLM-cache:smolvla-memory/VLM-cache-isolated MUJOCO_GL=$gl exec $py smolvla-memory/VLM-cache/check_memory.py "$@" ;;
   isolated-eval)  PYTHONPATH=.:smolvla-finetune:smolvla-memory/VLM-cache:smolvla-memory/VLM-cache-isolated MUJOCO_GL=$gl exec $py smolvla-memory/VLM-cache-isolated/eval_isolated.py "$@" ;;
   *)         [ -f sim/tools/run ] && . sim/tools/run  # local-only commands, if present (gitignored)
-             sed -n '2,34p' "$0" | sed 's/^# //' ;;
+             sed -n '2,35p' "$0" | sed 's/^# //' ;;
 esac

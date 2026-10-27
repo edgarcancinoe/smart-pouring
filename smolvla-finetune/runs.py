@@ -97,6 +97,11 @@ MODELS = {
                                                        repo="edgarcancinoe/smolvla_water_libero-4s-dart-full-xxl-sd-rel-b64-dagger2",
                                                        data="edgarcancinoe/water_pour_dagger2", dropout=0.3, batch=64, steps=8_000,
                                                        script="smolvla-memory/relative-actions/relative.py"),
+    # full-xxl-rel-b64 dagger, rounds 1 + 2 pooled: from the pre-DAgger model, as dagger1 (smolvla-recoveries/DAgger: ./run dagger-merge)
+    "libero-4s-dart-full-xxl-sd-rel-b64-dagger12": dict(start="libero-4s-dart-full-xxl-sd-rel-b64", k=4,
+                                                        repo="edgarcancinoe/smolvla_water_libero-4s-dart-full-xxl-sd-rel-b64-dagger12",
+                                                        data="edgarcancinoe/water_pour_dagger12", dropout=0.3, batch=64, steps=8_000,
+                                                        script="smolvla-memory/relative-actions/relative.py"),
     # anchor-xl-rel-b64 dagger
     "libero-4s-dart-full-anchor-xl-sd-rel-b64-dagger1": dict(start="libero-4s-dart-full-anchor-xl-sd-rel-b64", k=4,
                                                              repo="edgarcancinoe/smolvla_water_libero-4s-dart-full-anchor-xl-sd-rel-b64-dagger1",
@@ -135,8 +140,11 @@ def pick(clips, k):
     clips -> clip name of each dataset episode, in episode order (meta/clips.json)
     k     -> recordings per pair; each comes with its shifted replays (A1-0~1, ...); DAgger takeovers are always kept
     """
-    pairs, chosen = {}, []
+    pairs, chosen, seen = {}, [], set()
     for i, clip in sorted(enumerate(clips), key=lambda ic: episodes.sort_key(ic[1])):
+        if clip in seen:  # merged DAgger datasets carry the same demos twice: keep the first
+            continue
+        seen.add(clip)
         p = episodes.parse(clip)
         if p is None:  # a DAgger takeover (r1-left-2-0-t0): not from one recording
             chosen.append((i, clip))
