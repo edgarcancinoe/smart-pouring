@@ -20,4 +20,5 @@ The policy drives; when its hand is >1 cm off the demo's path, a (scripted) teac
 | model | takeovers | success, trained spots | success, new spots |
 |---|---|---|---|
 | `libero-4s-dart-full-xxl-sd-rel-b64` | – | 25/60 | 7/60 |
-| `…-dagger1` | | | |
+| `…-dagger1` | | 41/60 | 21/60 |
+| `…-dagger2` | | | |

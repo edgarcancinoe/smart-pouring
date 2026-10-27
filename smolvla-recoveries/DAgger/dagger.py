@@ -23,8 +23,8 @@ from dataset.upload import upload
 from sim.watering import CONTROL_HZ
 from teacher import Teacher
 
-ROUND = 1                           # DAgger round
-MODEL = f"libero-4s-dart-full-anchor-xl-sd-rel-b64-dagger{ROUND}"  # trained on this round's data (runs.MODELS: its "data" is the Hub repo)
+ROUND = 2                           # DAgger round
+MODEL = f"libero-4s-dart-full-xxl-sd-rel-b64-dagger{ROUND}"  # trained on this round's data (runs.MODELS: its "data" is the Hub repo)
 POLICY = runs.MODELS[MODEL]["start"]  # model rolled out this round: the one MODEL continues
 WITH_DART = False                   # also export the DART replays (if POLICY was trained on them)
 SPOTS = (1, 2, 3, 4)                # trained spots only: eval's new spots 5-8 stay unseen
@@ -38,8 +38,8 @@ GATE = {"reach": (1.0, 0.3),        # per teacher stage: cm off its path at whic
 MIN_TAKEOVER = 10                   # control steps a takeover lasts at least (no flicker between drivers)
 CHECK_PUSH_CM = 3.0                 # dagger-check: how far the hand wanders off the start pose before the teacher drives, cm
 CHECK_PUSH_STEPS = 40               # ... over this many control steps
-NAME = f"water_pour_anchor_dagger{ROUND}"  # local dataset folder (dataset/data/lerobot/<NAME>)
-OUT = episodes.DATA / "dagger-anchor"  # this run's takeovers (the xxl run's are in dagger/)
+NAME = f"water_pour_dagger{ROUND}"  # local dataset folder (dataset/data/lerobot/<NAME>)
+OUT = episodes.DATA / "dagger"  # the xxl run's takeovers, every round (the anchor run's are in dagger-anchor/)
 
 
 def start(job):
