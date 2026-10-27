@@ -16,3 +16,5 @@ sim/tools/
 smolvla-finetune/results/*
 !smolvla-finetune/results/tolerance.png
 !smolvla-finetune/results/spot_map.png
+# explainer video assets (large, local only)
+video/
