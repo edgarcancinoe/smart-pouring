@@ -29,4 +29,14 @@ Each trial in `results/<arm>/<model>/<plant>-<spot>-<trial>.json` (one job per t
 | 17–20 | Unclear | 24 more trials (60 in all), go if ≥ 31 |
 | ≤ 16 | All options are bad from unseen spots | more spread if the 8 were alike; else wider data, no world model |
 
+Result (36 paired trials): watered 22 → 24, success 13 → 14. The 8 chunks are nearly identical (median 0.5 cm apart after 1 s), so there is little to choose; it helped only where they differed (right-5).
+
+## Pour-only benchmark (`pour.py`)
+
+Each trial replays the plain policy until the mug is carried (5 cm up, under 30° tilt; same seeds as the main eval, so this part is exact), then the arm under test pours. It ends 1 s after the mug is empty, or when the mug is back on the table, or after 30 s. Trials where the mug is knocked over or never held end early and don't count.
+
+Score: drops in the target pot (`in_target`, of 10) over the carried trials (`carried` is not null). `ended` says why each stopped. The put-back never runs, so `placed`/`success` are always false here.
+
+`./run pour-plain` is the baseline; `./run pour` the cheat. Pour variants (shifted, lower, slower tilt) plug in as more arms.
+
 Plan: https://claude.ai/artifact/CXUSRic5UALTvam4SzRcDN

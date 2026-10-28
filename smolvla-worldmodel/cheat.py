@@ -102,6 +102,11 @@ def grip(e):
                 mug_on_pot=any(a == mug and b in pots or b == mug and a in pots for a, b in pairs))
 
 
+def carried(e):
+    """Whether the cheat may start: the mug lifted (pour.py makes it stricter)."""
+    return ev.mug_pose(e)[0][2] - _run["start"][2] > ev.LIFT_CM / 100
+
+
 def act(model, frame, task):
     """evaluate.act, logged; after the lift (mug not empty yet) and for ARM=cheat: the best of K chunks."""
     _run["chunk"] = chunk = _choose(model, frame, task)
@@ -111,7 +116,7 @@ def act(model, frame, task):
 def _choose(model, frame, task):
     env, e = _run["env"], _run["env"].env
     s = state(e)
-    _run["lifted"] |= ev.mug_pose(e)[0][2] - _run["start"][2] > ev.LIFT_CM / 100
+    _run["lifted"] |= carried(e)
     entry = dict(step=int(e.timestep), **s, **grip(e))
     _run["log"].append(entry)
     if ARM != "cheat" or not _run["lifted"] or s["in_mug"] == 0:

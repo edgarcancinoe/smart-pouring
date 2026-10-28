@@ -37,6 +37,8 @@
 #  world model (smolvla-worldmodel/)
 #   ./run cheat       [--jobs 8]   cheat test: best of K chunks after the lift, picked with sim state -> results/cheat/
 #   ./run cheat-plain [--jobs 8]   the same trials, plain policy, logged -> results/plain/
+#   ./run pour        [--jobs 30]  pour-only benchmark (from the moment the mug is carried), the cheat -> results/pour-cheat/
+#   ./run pour-plain  [--jobs 30]  the same, plain policy -> results/pour-plain/
 
 cd "$(dirname "$0")" || exit 1
 export PYTHONPATH=. PYTHONWARNINGS=ignore PYTHONUNBUFFERED=1
@@ -76,6 +78,8 @@ case "$cmd" in
   isolated-eval)  PYTHONPATH=.:smolvla-finetune:smolvla-memory/VLM-cache:smolvla-memory/VLM-cache-isolated MUJOCO_GL=$gl exec $py smolvla-memory/VLM-cache-isolated/eval_isolated.py "$@" ;;
   cheat)       ARM=cheat PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions MUJOCO_GL=$gl exec $py smolvla-worldmodel/cheat.py "$@" ;;
   cheat-plain) ARM=plain PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions MUJOCO_GL=$gl exec $py smolvla-worldmodel/cheat.py "$@" ;;
+  pour)        ARM=cheat PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions:smolvla-worldmodel MUJOCO_GL=$gl exec $py smolvla-worldmodel/pour.py "$@" ;;
+  pour-plain)  ARM=plain PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions:smolvla-worldmodel MUJOCO_GL=$gl exec $py smolvla-worldmodel/pour.py "$@" ;;
   *)         [ -f sim/tools/run ] && . sim/tools/run  # local-only commands, if present (gitignored)
-             sed -n '2,39p' "$0" | sed 's/^# //' ;;
+             sed -n '2,41p' "$0" | sed 's/^# //' ;;
 esac
