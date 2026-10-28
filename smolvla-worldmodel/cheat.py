@@ -3,11 +3,12 @@
 After the lift, at each replan: save the sim, sample K chunks (different noise), run LOOKAHEAD actions of each, score
 it with sim state (drops over the target pot, mug mouth's distance to it), rewind, run the best one's first
 N_ACTION_STEPS. Until the lift and once the mug is empty: the plain policy. ARM=plain runs the same trials without
-the cheat, with the same per-replan log (mug vs pot, tilt, drops) -> results/<arm>/<model>/<plant>-<spot>.json.
+the cheat, with the same per-replan log (mug vs pot, tilt, drops) -> results/<arm>/<model>/<plant>-<spot>-<trial>.json.
 
 Usage: ./run cheat [--jobs 8]         the cheat, MODEL, 3 plants x spots 5-8 x TRIALS
        ./run cheat-plain [--jobs 8]   the same trials, plain policy, logged
 """
+import json
 import os
 from pathlib import Path
 
@@ -135,11 +136,40 @@ def trial(*args, **kwargs):
     return dict(r, arm=ARM, rewind_mm=_run.get("rewind_mm"), log=_run["log"])
 
 
+def run_unit(unit, name, grasp=False, tally=None, lock=None):
+    """evaluate.run_unit for one trial (a cheat trial is long: one job each) -> results/<arm>/<model>/<plant>-<spot>-<t>.json.
+
+    unit -> "<plant>-<spot>-<t>", e.g. "left-6-2": trial t of the main eval's seeds
+    """
+    plant, spot, t = unit.split("-")
+    spot, t = int(spot), int(t)
+    out = RESULTS / name
+    (out / "videos").mkdir(parents=True, exist_ok=True)
+    torch.set_num_threads(1)
+    r = trial(ev.scene(plant), ev.load_model(name), plant, spot, ev.trial_seed(plant, spot, t),
+              out / "videos" / f"{plant}-{spot}.mp4" if t == 0 else None)
+    mark = lambda ok: "yes" if ok else "NO"
+    print(f"  {unit}: lifted {mark(r['lifted'])} · watered {mark(r['watered'])} ({r['in_target']}/10) · "
+          f"put back {mark(r['placed'])} -> {'SUCCESS' if r['success'] else 'fail'} ({r['steps']} steps, {r['seconds']:.0f} s)", flush=True)
+    if tally is not None:
+        with lock:
+            tally["trials"] += 1
+            tally["hits"] += r["success"]
+            for k in ("lifted", "watered", "placed"):
+                tally[k] = tally.get(k, 0) + r[k]
+            print(f"  so far ({ARM}): {tally['trials']} trials · lifted {tally['lifted']} · watered {tally['watered']} · "
+                  f"put back {tally['placed']} · success {tally['hits']}", flush=True)
+    (out / f"{unit}.json").write_text(json.dumps(dict(
+        model=name, plant=plant, spot=spot, spot_cm=ev.SPOTS[spot], trained_spot=spot in ev.TRAINED_SPOTS,
+        n_action_steps=ev.N_ACTION_STEPS, max_steps=ev.MAX_STEPS, trials=[r]), indent=1))
+    return dict(clip=unit, summary="success" if r["success"] else "fail")
+
+
 # at import, so the spawned eval workers get them too
-ev.act, ev.reset, ev.trial = act, reset, trial
-ev.RESULTS, ev.MODELS, ev.TRIALS = RESULTS, [MODEL], TRIALS
-ev.UNITS = [f"{p}-{s}" for p in ev.PLANTS for s in SPOTS]
-ev.VERBOSE = True  # a line per trial (time per trial: the cheat's cost)
+ev.act, ev.reset, ev.trial, ev.run_unit = act, reset, trial, run_unit
+ev.RESULTS, ev.MODELS, ev.TRIALS = RESULTS, [MODEL], 1  # TRIALS: one per unit (main's progress counts)
+ev.UNITS = [f"{p}-{s}-{t}" for p in ev.PLANTS for s in SPOTS for t in range(TRIALS)]
+ev.VERBOSE = True  # clock lines every PROGRESS_EVERY steps (the cheat's cost)
 
 if __name__ == "__main__":
     ev.main()

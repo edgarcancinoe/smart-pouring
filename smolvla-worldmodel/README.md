@@ -17,7 +17,7 @@ No learned judge can choose better than this, so the cheat's gain over dagger1 i
 
 Trials: 3 plants × spots 5–8 × 3 = 36, the first 3 seeds of the main eval. `./run cheat-plain` runs the same trials without the cheat, with the same log.
 
-Each trial in `results/<arm>/<model>/<plant>-<spot>.json` adds:
+Each trial in `results/<arm>/<model>/<plant>-<spot>-<trial>.json` (one job per trial) adds:
 - `log`: one entry per replan: mug mouth vs target pot (cm), tilt, drops in the mug / over the pot / elsewhere; for the cheat, the 8 scores, the pick and the spread of the 8 end positions (cm).
 - `rewind_mm`: the same chunk run twice from the same saved state; 0 means the rewind is exact (checked on the Mac: 0.0).
 
