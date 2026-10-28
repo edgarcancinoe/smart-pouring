@@ -34,6 +34,10 @@
 #   ./run isolated-eval  [model ...] [--jobs 8]   isolated VLM-cache memory models in the sim (as ./run eval)
 #   ./run memory-check   [model ...]              does a memory model use its memory? is eval's cache exact? (no sim)
 
+#  world model (smolvla-worldmodel/)
+#   ./run cheat       [--jobs 8]   cheat test: best of K chunks after the lift, picked with sim state -> results/cheat/
+#   ./run cheat-plain [--jobs 8]   the same trials, plain policy, logged -> results/plain/
+
 cd "$(dirname "$0")" || exit 1
 export PYTHONPATH=. PYTHONWARNINGS=ignore PYTHONUNBUFFERED=1
 py=.venv/bin/python
@@ -70,6 +74,8 @@ case "$cmd" in
   memory-eval)    PYTHONPATH=.:smolvla-finetune:smolvla-memory/VLM-cache MUJOCO_GL=$gl exec $py smolvla-memory/VLM-cache/eval_memory.py "$@" ;;
   memory-check)   PYTHONPATH=.:smolvla-finetune:smolvla-memory/VLM-cache:smolvla-memory/VLM-cache-isolated MUJOCO_GL=$gl exec $py smolvla-memory/VLM-cache/check_memory.py "$@" ;;
   isolated-eval)  PYTHONPATH=.:smolvla-finetune:smolvla-memory/VLM-cache:smolvla-memory/VLM-cache-isolated MUJOCO_GL=$gl exec $py smolvla-memory/VLM-cache-isolated/eval_isolated.py "$@" ;;
+  cheat)       ARM=cheat PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions MUJOCO_GL=$gl exec $py smolvla-worldmodel/cheat.py "$@" ;;
+  cheat-plain) ARM=plain PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions MUJOCO_GL=$gl exec $py smolvla-worldmodel/cheat.py "$@" ;;
   *)         [ -f sim/tools/run ] && . sim/tools/run  # local-only commands, if present (gitignored)
-             sed -n '2,35p' "$0" | sed 's/^# //' ;;
+             sed -n '2,39p' "$0" | sed 's/^# //' ;;
 esac
