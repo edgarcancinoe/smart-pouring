@@ -39,6 +39,11 @@ Score: drops in the target pot (`in_target`, of 10) over the carried trials (`ca
 
 `./run pour-plain` is the baseline; `./run pour` the cheat; `./run pour-distance` the cheat scored by mouth-to-pot distance only (no water), to see whether a judge must predict the water or only where the mug goes.
 
-Result (60 seeds): plain 30/40 held mugs watered (7.4 drops), cheat 40/41 (9.4); paired on the 36 trials whose pour started the same, 28 → 35.
+Result (60 seeds): plain 30/40 held mugs watered (7.4 drops), cheat 40/41 (9.4); paired on the 36 trials whose pour started the same, 28 → 35. Distance only: 31/41 (7.4), no better than plain: it fixes the tip-untip pours but every middle-5 pour tips near the pot and misses. A judge has to predict the water.
+
+## Controls
+
+- **A, random of 8** (`./run pour-random`): the cheat's 8 look-aheads, then a random one runs. Should equal plain: the cheat's gain is the choice, not the resampling or the rewinds.
+- **B, the cheat distilled** (`distill.py`): the cheat pours at the trained spots 1-4 (DAgger's seeds and jitter), recorded from the carry on like a DAgger takeover; the watered ones join dagger1's data and dagger1 trains 8k steps more (`…-dagger1-cheat`). Pour-tested on spots 5-8 (`./run pour-distilled`). Near the cheat's 40/41: no judge needed at run time.
 
 Plan: https://claude.ai/artifact/CXUSRic5UALTvam4SzRcDN

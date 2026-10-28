@@ -23,8 +23,8 @@ import grasp_position as gp
 from dataset.export_lerobot import CAMERAS
 from sim.watering.assets import MUG, POTS_DIMS
 
-ARM = os.environ.get("ARM", "cheat")  # "cheat", "distance" (the cheat scored by distance only) or "plain" (env var so the workers see it)
-MODEL = "libero-4s-dart-full-xxl-sd-rel-b64-dagger1"
+ARM = os.environ.get("ARM", "cheat")  # "cheat", "distance" (the cheat scored by distance only), "random" (a random one of the K) or "plain" (env var so the workers see it)
+MODEL = os.environ.get("MODEL", "libero-4s-dart-full-xxl-sd-rel-b64-dagger1")
 SPOTS = (5, 6, 7, 8)    # unseen spots only
 TRIALS = 3              # per plant x spot, the first 3 seeds of the main eval
 K = 8                   # chunks sampled per replan
@@ -76,15 +76,19 @@ def state(e):
 
 def score(s):
     """Higher is better: drops over the target pot, minus drops elsewhere, then the mouth's xy distance to the pot (cm).
-    ARM=distance: the distance only (no water)."""
+    ARM=distance: the distance only (no water). ARM=random: a random number (control A: K draws, no choice)."""
+    if ARM == "random":
+        return float(np.random.random())
     drops = 0 if ARM == "distance" else DROP_WEIGHT * (s["over"] - s["elsewhere"])
     return drops - float(np.linalg.norm(s["mouth_cm"][:2]))
 
 
 def lookahead(env, chunk):
     """Run the chunk's first LOOKAHEAD actions; returns the state after them and [gripper xyz, droplet xyz...] (m)."""
+    _run["looking"] = True  # distill.py records only the steps really run
     for a in chunk[:LOOKAHEAD]:
         obs, *_ = env.step(a)
+    _run["looking"] = False
     return state(env.env), np.r_[obs["robot0_eef_pos"], env.env.droplet_positions().ravel()]
 
 
