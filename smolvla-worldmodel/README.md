@@ -37,6 +37,8 @@ Each trial replays the plain policy until the mug is carried (5 cm up, under 30Â
 
 Score: drops in the target pot (`in_target`, of 10) over the carried trials (`carried` is not null). `ended` says why each stopped. The put-back never runs, so `placed`/`success` are always false here.
 
-`./run pour-plain` is the baseline; `./run pour` the cheat. Pour variants (shifted, lower, slower tilt) plug in as more arms.
+`./run pour-plain` is the baseline; `./run pour` the cheat; `./run pour-distance` the cheat scored by mouth-to-pot distance only (no water), to see whether a judge must predict the water or only where the mug goes.
+
+Result (60 seeds): plain 30/40 held mugs watered (7.4 drops), cheat 40/41 (9.4); paired on the 36 trials whose pour started the same, 28 â†’ 35.
 
 Plan: https://claude.ai/artifact/CXUSRic5UALTvam4SzRcDN

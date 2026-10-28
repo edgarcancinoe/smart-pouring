@@ -23,7 +23,7 @@ import grasp_position as gp
 from dataset.export_lerobot import CAMERAS
 from sim.watering.assets import MUG, POTS_DIMS
 
-ARM = os.environ.get("ARM", "cheat")  # "cheat" or "plain" (./run cheat / cheat-plain; env var so the workers see it)
+ARM = os.environ.get("ARM", "cheat")  # "cheat", "distance" (the cheat scored by distance only) or "plain" (env var so the workers see it)
 MODEL = "libero-4s-dart-full-xxl-sd-rel-b64-dagger1"
 SPOTS = (5, 6, 7, 8)    # unseen spots only
 TRIALS = 3              # per plant x spot: 36 in all, the first 3 seeds of the main eval
@@ -75,8 +75,10 @@ def state(e):
 
 
 def score(s):
-    """Higher is better: drops over the target pot, minus drops elsewhere, then the mouth's xy distance to the pot (cm)."""
-    return DROP_WEIGHT * (s["over"] - s["elsewhere"]) - float(np.linalg.norm(s["mouth_cm"][:2]))
+    """Higher is better: drops over the target pot, minus drops elsewhere, then the mouth's xy distance to the pot (cm).
+    ARM=distance: the distance only (no water)."""
+    drops = 0 if ARM == "distance" else DROP_WEIGHT * (s["over"] - s["elsewhere"])
+    return drops - float(np.linalg.norm(s["mouth_cm"][:2]))
 
 
 def lookahead(env, chunk):
@@ -119,7 +121,7 @@ def _choose(model, frame, task):
     _run["lifted"] |= carried(e)
     entry = dict(step=int(e.timestep), **s, **grip(e))
     _run["log"].append(entry)
-    if ARM != "cheat" or not _run["lifted"] or s["in_mug"] == 0:
+    if ARM == "plain" or not _run["lifted"] or s["in_mug"] == 0:
         return _act(model, frame, task)
 
     policy, pre, post = model
