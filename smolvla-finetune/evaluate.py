@@ -96,6 +96,7 @@ def load_model(name):
         cfg.device = runs.device()
         if cfg.device == "cuda":  # several GPUs: the workers take turns (slot 0, 1, 2, ... per eval run; pids aren't evenly spread)
             cfg.device = f"cuda:{_slot() % torch.cuda.device_count()}"
+            torch.cuda.set_device(cfg.device)  # else every worker also opens a context on GPU 0
         policy = SmolVLAPolicy.from_pretrained(repo, config=cfg, revision=rev).eval()
         pre, post = make_pre_post_processors(cfg, pretrained_path=repo, pretrained_revision=rev,
                                              preprocessor_overrides={"device_processor": {"device": cfg.device}})

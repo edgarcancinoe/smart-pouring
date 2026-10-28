@@ -25,7 +25,7 @@ from sim.watering.assets import MUG, POTS_DIMS
 
 ARM = os.environ.get("ARM", "cheat")  # "cheat", "distance" (the cheat scored by distance only) or "plain" (env var so the workers see it)
 MODEL = "libero-4s-dart-full-xxl-sd-rel-b64-dagger1"
-SPOTS = (1, 2, 3, 4, 5, 6, 7, 8)  # trained 1-4 and unseen 5-8 (a rerun skips the units already done)
+SPOTS = (5, 6, 7, 8)    # unseen spots only
 TRIALS = 3              # per plant x spot, the first 3 seeds of the main eval
 K = 8                   # chunks sampled per replan
 LOOKAHEAD = 20          # actions of each chunk run before scoring it (1 s)
