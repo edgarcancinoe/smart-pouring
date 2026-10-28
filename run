@@ -39,6 +39,7 @@
 #   ./run cheat-plain [--jobs 8]   the same trials, plain policy, logged -> results/plain/
 #   ./run pour        [--jobs 30]  pour-only benchmark (from the moment the mug is carried), the cheat -> results/pour-cheat/
 #   ./run pour-plain  [--jobs 30]  the same, plain policy -> results/pour-plain/
+#   ./run pour-film [clips] [--jobs 30]  re-run pour-plain's failed pours with video -> results/pour-plain/<model>/videos/
 
 cd "$(dirname "$0")" || exit 1
 export PYTHONPATH=. PYTHONWARNINGS=ignore PYTHONUNBUFFERED=1
@@ -76,10 +77,11 @@ case "$cmd" in
   memory-eval)    PYTHONPATH=.:smolvla-finetune:smolvla-memory/VLM-cache MUJOCO_GL=$gl exec $py smolvla-memory/VLM-cache/eval_memory.py "$@" ;;
   memory-check)   PYTHONPATH=.:smolvla-finetune:smolvla-memory/VLM-cache:smolvla-memory/VLM-cache-isolated MUJOCO_GL=$gl exec $py smolvla-memory/VLM-cache/check_memory.py "$@" ;;
   isolated-eval)  PYTHONPATH=.:smolvla-finetune:smolvla-memory/VLM-cache:smolvla-memory/VLM-cache-isolated MUJOCO_GL=$gl exec $py smolvla-memory/VLM-cache-isolated/eval_isolated.py "$@" ;;
-  cheat)       ARM=cheat PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions MUJOCO_GL=$gl exec $py smolvla-worldmodel/cheat.py "$@" ;;
-  cheat-plain) ARM=plain PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions MUJOCO_GL=$gl exec $py smolvla-worldmodel/cheat.py "$@" ;;
-  pour)        ARM=cheat PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions:smolvla-worldmodel MUJOCO_GL=$gl exec $py smolvla-worldmodel/pour.py "$@" ;;
-  pour-plain)  ARM=plain PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions:smolvla-worldmodel MUJOCO_GL=$gl exec $py smolvla-worldmodel/pour.py "$@" ;;
+  cheat)       OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 ARM=cheat PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions MUJOCO_GL=$gl exec $py smolvla-worldmodel/cheat.py "$@" ;;
+  cheat-plain) OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 ARM=plain PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions MUJOCO_GL=$gl exec $py smolvla-worldmodel/cheat.py "$@" ;;
+  pour)        OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 ARM=cheat PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions:smolvla-worldmodel MUJOCO_GL=$gl exec $py smolvla-worldmodel/pour.py "$@" ;;
+  pour-plain)  OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 ARM=plain PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions:smolvla-worldmodel MUJOCO_GL=$gl exec $py smolvla-worldmodel/pour.py "$@" ;;
+  pour-film)   OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 ARM=plain PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions:smolvla-worldmodel MUJOCO_GL=$gl exec $py smolvla-worldmodel/film.py "$@" ;;
   *)         [ -f sim/tools/run ] && . sim/tools/run  # local-only commands, if present (gitignored)
-             sed -n '2,41p' "$0" | sed 's/^# //' ;;
+             sed -n '2,42p' "$0" | sed 's/^# //' ;;
 esac
