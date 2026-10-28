@@ -298,7 +298,7 @@ def main():
     for name in models:
         todo = [u for u in UNITS if not (out / name / f"{u}.json").exists()]
         print(f"\n=== {name}: {len(todo)} of {len(UNITS)} units to run, {TRIALS} trials each", flush=True)
-        load_model(name)  # once here, so the workers load it from the local cache...
+        load_model(name), scene(PLANTS[0])  # once here (model, LIBERO textures), so the workers load them from the local cache...
         os.environ["HF_HUB_OFFLINE"] = "1"  # ...without asking the Hub (dozens of workers hit its rate limit)
         tally, lock, stop = manager.dict(trials=0, hits=0), manager.Lock(), threading.Event()
         total, t0 = len(todo) * TRIALS, time.time()
