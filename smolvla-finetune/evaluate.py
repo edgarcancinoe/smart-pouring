@@ -70,6 +70,16 @@ OPEN = np.r_[np.zeros(6), -1.0]  # no motion, gripper open
 _cache = {}  # per process: the loaded model and one env per plant
 
 
+def _slot():
+    """This worker's number within the eval run: the first free one, claimed by creating its file."""
+    for i in range(10 ** 4):
+        try:
+            os.close(os.open(f"/tmp/eval-slot-{os.getppid()}-{i}", os.O_CREAT | os.O_EXCL))
+            return i
+        except FileExistsError:
+            pass
+
+
 def load_model(name):
     """Policy and its LeRobot pre/post-processors (normalization, tokenizer, camera renames), on this machine's device.
 
@@ -84,8 +94,8 @@ def load_model(name):
         repo, rev = runs.repo(name)
         cfg = PreTrainedConfig.from_pretrained(repo, revision=rev)
         cfg.device = runs.device()
-        if cfg.device == "cuda":  # several GPUs: spread the workers over them
-            cfg.device = f"cuda:{os.getpid() % torch.cuda.device_count()}"
+        if cfg.device == "cuda":  # several GPUs: the workers take turns (slot 0, 1, 2, ... per eval run; pids aren't evenly spread)
+            cfg.device = f"cuda:{_slot() % torch.cuda.device_count()}"
         policy = SmolVLAPolicy.from_pretrained(repo, config=cfg, revision=rev).eval()
         pre, post = make_pre_post_processors(cfg, pretrained_path=repo, pretrained_revision=rev,
                                              preprocessor_overrides={"device_processor": {"device": cfg.device}})

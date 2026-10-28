@@ -5,7 +5,7 @@ it with sim state (drops over the target pot, mug mouth's distance to it), rewin
 N_ACTION_STEPS. Until the lift and once the mug is empty: the plain policy. ARM=plain runs the same trials without
 the cheat, with the same per-replan log (mug vs pot, tilt, drops) -> results/<arm>/<model>/<plant>-<spot>-<trial>.json.
 
-Usage: ./run cheat [--jobs 8]         the cheat, MODEL, 3 plants x spots 5-8 x TRIALS
+Usage: ./run cheat [--jobs 8]         the cheat, MODEL, 3 plants x SPOTS x TRIALS
        ./run cheat-plain [--jobs 8]   the same trials, plain policy, logged
 """
 import json
@@ -25,8 +25,8 @@ from sim.watering.assets import MUG, POTS_DIMS
 
 ARM = os.environ.get("ARM", "cheat")  # "cheat", "distance" (the cheat scored by distance only) or "plain" (env var so the workers see it)
 MODEL = "libero-4s-dart-full-xxl-sd-rel-b64-dagger1"
-SPOTS = (5, 6, 7, 8)    # unseen spots only
-TRIALS = 3              # per plant x spot: 36 in all, the first 3 seeds of the main eval
+SPOTS = (1, 2, 3, 4, 5, 6, 7, 8)  # trained 1-4 and unseen 5-8 (a rerun skips the units already done)
+TRIALS = 3              # per plant x spot, the first 3 seeds of the main eval
 K = 8                   # chunks sampled per replan
 LOOKAHEAD = 20          # actions of each chunk run before scoring it (1 s)
 DROP_WEIGHT = 10.0      # score per drop over the target pot (minus per drop out of the mug elsewhere), vs cm of mouth distance

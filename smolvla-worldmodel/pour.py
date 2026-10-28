@@ -3,7 +3,7 @@ then the arm under test pours, and the trial ends once the mug is empty and the 
 put-back: the score is drops in the target pot (of 10) over the carried trials, and a trial costs the pour only.
 Same per-replan log as cheat.py -> results/pour-<arm>/<model>/<plant>-<spot>-<trial>.json, plus carried/ended.
 
-Usage: ./run pour [--jobs 30]         the cheat (best of K chunks), spots 5-8 x TRIALS
+Usage: ./run pour [--jobs 30]         the cheat (best of K chunks), SPOTS x TRIALS
        ./run pour-plain [--jobs 30]   the plain policy, same trials
 """
 import numpy as np
@@ -11,7 +11,7 @@ import numpy as np
 import cheat  # patches evaluate (per-replan log, ARM's chunk choice); this file patches on top
 import evaluate as ev
 
-TRIALS = 5              # per plant x spot: 60 in all, the main eval's seeds (dagger1 carries the mug in ~49)
+TRIALS = 5              # per plant x spot, the main eval's seeds
 CARRIED_CM = 5.0        # the pour starts once the mug is this far above where it stood...
 UPRIGHT_DEG = 30.0      # ...and tilted less than this (a mug knocked onto its side also rises ~3-4 cm)
 POUR_STEPS = 600        # control steps the pour may take once carried (30 s)
