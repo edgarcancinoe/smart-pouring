@@ -34,6 +34,7 @@ RESULTS = Path(__file__).parent / "results" / ARM
 
 _act, _reset, _trial = ev.act, ev.reset, ev.trial
 _run = {}  # this process's running trial: env, mug start, lifted, log
+on_choice = None  # judge.py: f(frame, chunks, outcomes, pick) at each choice: the K chunks and state() after each one's look-ahead
 
 
 def snapshot(e):
@@ -142,13 +143,16 @@ def _choose(model, frame, task):
             ends.append(lookahead(env, chunks[0])[1])
             restore(e, snap)
         _run["rewind_mm"] = round(float(np.abs(ends[0] - ends[1]).max() * 1000), 3)  # gripper or any droplet; 0 = exact
-    ends, scores = [], []
+    ends, scores, outcomes = [], [], []
     for c in chunks:
         s_end, end = lookahead(env, c)
         restore(e, snap)
         ends.append(end[:3])
         scores.append(score(s_end))
+        outcomes.append(s_end)
     best = int(np.argmax(scores))
+    if on_choice:
+        on_choice(frame, chunks, outcomes, best)
     entry.update(scores=np.round(scores, 1).tolist(), pick=best,
                  spread_cm=round(float(np.linalg.norm(np.array(ends) - np.mean(ends, 0), axis=1).mean() * 100), 2))
     return chunks[best, :ev.N_ACTION_STEPS]

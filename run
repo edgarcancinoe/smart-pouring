@@ -45,6 +45,8 @@
 #   ./run distill     [--jobs 16]  control B: the cheat pours at spots 1-4, recorded -> dataset/data/cheat/
 #   ./run distill-export           the watered ones + dagger1's data -> Hub (then ./run train libero-4s-dart-full-xxl-sd-rel-b64-dagger1-cheat)
 #   ./run pour-distilled [--jobs 30]  the pour-only benchmark of that model -> results/pour-plain/<model>/
+#   ./run distill-upweight         B2: the same data with the cheat pours 5x -> Hub (then ./run train <model>5, ./run pour-plain <model>5)
+#   ./run judge-record [--jobs 8]  outcome judge data: pours at spots 1-4, a random chunk runs, all K scored -> results/judge-data/
 
 cd "$(dirname "$0")" || exit 1
 export PYTHONPATH=. PYTHONWARNINGS=ignore PYTHONUNBUFFERED=1
@@ -88,10 +90,12 @@ case "$cmd" in
   pour-plain)  OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 ARM=plain PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions:smolvla-worldmodel MUJOCO_GL=$gl exec $py smolvla-worldmodel/pour.py "$@" ;;
   pour-distance) OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 ARM=distance PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions:smolvla-worldmodel MUJOCO_GL=$gl exec $py smolvla-worldmodel/pour.py "$@" ;;
   pour-random) OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 ARM=random PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions:smolvla-worldmodel MUJOCO_GL=$gl exec $py smolvla-worldmodel/pour.py "$@" ;;
+  judge-record) OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 ARM=random PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions:smolvla-worldmodel MUJOCO_GL=$gl exec $py smolvla-worldmodel/judge.py "$@" ;;
   distill)     OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 ARM=cheat PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions:smolvla-worldmodel:smolvla-recoveries/DAgger MUJOCO_GL=$gl exec $py smolvla-worldmodel/distill.py "$@" ;;
   distill-export) OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 ARM=cheat PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions:smolvla-worldmodel:smolvla-recoveries/DAgger MUJOCO_GL=$gl exec $py smolvla-worldmodel/distill.py --export ;;
+  distill-upweight) OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 ARM=cheat PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions:smolvla-worldmodel:smolvla-recoveries/DAgger MUJOCO_GL=$gl exec $py smolvla-worldmodel/distill.py --upweight ;;
   pour-distilled) OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 ARM=plain MODEL=libero-4s-dart-full-xxl-sd-rel-b64-dagger1-cheat PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions:smolvla-worldmodel MUJOCO_GL=$gl exec $py smolvla-worldmodel/pour.py "$@" ;;
   pour-film)   OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 ARM=plain PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions:smolvla-worldmodel MUJOCO_GL=$gl exec $py smolvla-worldmodel/film.py "$@" ;;
   *)         [ -f sim/tools/run ] && . sim/tools/run  # local-only commands, if present (gitignored)
-             sed -n '2,47p' "$0" | sed 's/^# //' ;;
+             sed -n '2,49p' "$0" | sed 's/^# //' ;;
 esac

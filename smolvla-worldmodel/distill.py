@@ -5,16 +5,24 @@ Then the pour-only benchmark on spots 5-8: near the cheat's 40/41 means no judge
 Usage: ./run distill [--jobs 16]   the cheat's pours, SPOTS x TRIALS -> dataset/data/cheat/<clip>/ + results/distill/
        ./run distill-export        the watered pours -> dataset -> merged with dagger1's -> Hub (then ./run train MODEL)
        ./run pour-distilled        the pour-only benchmark of MODEL (plain policy) -> results/pour-plain/MODEL/
+       ./run distill-upweight      B2: dagger1's data + the pours COPIES times -> UPWEIGHTED's data -> Hub (then ./run train UPWEIGHTED,
+                                   ./run pour-plain UPWEIGHTED)
 """
 import json
+import shutil
 import sys
+from pathlib import Path
 
 import numpy as np
+from huggingface_hub import hf_hub_download
+from lerobot.datasets import LeRobotDataset
+from lerobot.datasets.dataset_tools import merge_datasets
 
 import cheat
 import pour  # noqa: F401 (at import: the pour-only benchmark, the cheat's chunk choice; patched further below)
 import dagger
 import evaluate as ev
+import runs
 from dataset import episodes
 from dataset.export_lerobot import export
 from dataset.sim_runs import playback
@@ -22,6 +30,8 @@ from dataset.upload import upload
 from sim.watering import CONTROL_HZ
 
 MODEL = "libero-4s-dart-full-xxl-sd-rel-b64-dagger1-cheat"  # runs.MODELS: dagger1 trained on with these pours
+UPWEIGHTED = f"{MODEL}5"  # B2: the same, the pours COPIES times (MODEL: 100 of 944 episodes, no gain)
+COPIES = 5
 SPOTS = (1, 2, 3, 4)    # trained spots only: the eval's new spots 5-8 stay unseen
 TRIALS = 10             # per plant x spot
 MUG_JITTER = 0.03       # m, as DAgger's rollouts (eval: 0.01)
@@ -81,6 +91,21 @@ def export_all():
     dagger.merge()
 
 
+def upweight():
+    """dagger1's data + the pours (Hub dataset NAME) COPIES times -> UPWEIGHTED's data -> Hub.
+    Each copy gets its own clip names (runs.pick keeps a name once)."""
+    repo = runs.MODELS[UPWEIGHTED]["data"]
+    root = episodes.DATA / "lerobot" / repo.split("/")[1]
+    shutil.rmtree(root, ignore_errors=True)
+    base, pours = LeRobotDataset("edgarcancinoe/water_pour_dagger1"), LeRobotDataset(f"edgarcancinoe/{NAME}")
+    merge_datasets([base] + [pours] * COPIES, repo, root)
+    clips = lambda ds: json.loads(Path(hf_hub_download(ds.repo_id, "meta/clips.json", repo_type="dataset")).read_text())
+    names = clips(base) + [f"{c}-x{i}" for i in range(COPIES) for c in clips(pours)]
+    assert len(names) == base.num_episodes + COPIES * pours.num_episodes
+    (root / "meta" / "clips.json").write_text(json.dumps(names))
+    upload(root.name, repo)
+
+
 # at import, so the spawned eval workers get them too
 ev.reset, cheat.trial, ev.run_unit = reset, trial, run_unit
 ev.trial_seed = lambda plant, spot, t: SEED + _seed(plant, spot, t)
@@ -90,5 +115,7 @@ ev.UNITS = [f"{p}-{s}-{t}" for p in ev.PLANTS for s in SPOTS for t in range(TRIA
 if __name__ == "__main__":
     if "--export" in sys.argv:
         export_all()
+    elif "--upweight" in sys.argv:
+        upweight()
     else:
         ev.main()

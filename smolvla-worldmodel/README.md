@@ -43,7 +43,7 @@ Result (60 seeds): plain 30/40 held mugs watered (7.4 drops), cheat 40/41 (9.4);
 
 ## Controls
 
-- **A, random of 8** (`./run pour-random`): the cheat's 8 look-aheads, then a random one runs. Should equal plain: the cheat's gain is the choice, not the resampling or the rewinds.
+- **A, random of 8** (`./run pour-random`): the cheat's 8 look-aheads, then a random one runs. Should equal plain: the cheat's gain is the choice, not the resampling or the rewinds. Result: 31/46 held mugs watered (6.9 drops); paired on the 34 trials both carried, plain 26, random 25. It does: the gain is the choice.
 - **B, the cheat distilled** (`distill.py`): the cheat pours at the trained spots 1-4 (DAgger's seeds and jitter), recorded from the carry on like a DAgger takeover; the watered ones join dagger1's data and dagger1 trains 8k steps more (`…-dagger1-cheat`). Pour-tested on spots 5-8 (`./run pour-distilled`). Near the cheat's 40/41: no judge needed at run time.
 
 Plan: https://claude.ai/artifact/CXUSRic5UALTvam4SzRcDN
