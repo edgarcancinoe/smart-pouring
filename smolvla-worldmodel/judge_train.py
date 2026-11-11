@@ -1,7 +1,8 @@
 """Outcome judge, step 3: learn which of SmolVLA's K chunks is better, from the cameras, without the simulator.
 
-Per replan: both cameras through the policy's own frozen vision encoder (SmolVLA's SigLIP + connector, mean over its
-image tokens, cut to their IMAGE_DIMS main directions), the state and the plant; per chunk: its first LOOKAHEAD actions minus the K's mean. An MLP predicts the chunk's relative
+Per replan: the cameras in VIEWS through the policy's own frozen vision encoder (SmolVLA's SigLIP + connector: a grid of
+image tokens, one per patch). GRID: every token cut to its IMAGE_DIMS main directions, the grid kept (where things are);
+else the mean over the tokens (what is there, not where), cut to IMAGE_DIMS, the state and the plant; per chunk: its first LOOKAHEAD actions minus the K's mean. An MLP predicts the chunk's relative
 score: its score (judge_check.score, by phase) minus the mean of the K at that replan. Choosing only needs the ranking
 among the K, so the replan's own level (how well the pour is going) is taken out of the target. Every phase and every
 replan is used: where the K are equal the target is 0, no preference; decisive replans are weighted up to
@@ -41,14 +42,16 @@ WEIGHT_DECAY = 1e-2
 FEATURE_BATCH = 32      # replans per pass through the vision encoder
 IMAGE_DIMS = 64         # image features kept (PCA); both views at 64 memorized the trials (held-out loss flat)
 VIEWS = ("observation.images.image",)  # cameras the judge sees: the main view (both: pour start 0.18, none: 0.34)
+GRID = False            # keep the token grid (each token cut to IMAGE_DIMS) instead of its mean
 MAIN, WRIST = CAMERAS
-ABLATIONS = [((WRIST,), 16), ((WRIST,), 32), ((WRIST,), 64)]  # (VIEWS, IMAGE_DIMS) ABLATE=1 compares
+ABLATIONS = [((WRIST,), 2, True), ((WRIST,), 4, True), ((WRIST,), 8, True), ((MAIN,), 4, True),
+             ((MAIN, WRIST), 4, True)]  # (VIEWS, IMAGE_DIMS, GRID) ABLATE=1 compares
 
 
 def features(d):
-    """Both cameras of every replan through the policy's frozen vision encoder, mean over image tokens
-    -> (R, cameras x width), in load()'s order; cached per recorded trial in features/."""
-    cache = OUT / "features"
+    """Both cameras of every replan through the policy's frozen vision encoder, its image tokens
+    -> (R, cameras, tokens, width) float16, in load()'s order; cached per recorded trial in features-grid/."""
+    cache = OUT / "features-grid"
     cache.mkdir(parents=True, exist_ok=True)
     out = []
     for i, f in enumerate(d["files"]):
@@ -62,7 +65,7 @@ def features(d):
                 batch["task"] = [f"Water the {z['plant']} plant"] * len(batch["observation.state"])
                 with torch.inference_mode():
                     images, _ = policy.prepare_images(pre(batch))
-                    emb.append(torch.cat([policy.model.vlm_with_expert.embed_image(im).float().mean(1) for im in images], 1).cpu().numpy())
+                    emb.append(torch.stack([policy.model.vlm_with_expert.embed_image(im) for im in images], 1).half().cpu().numpy())
             np.save(path, np.concatenate(emb))
             print(f"features [{i + 1}/{len(d['files'])}] {f.stem}", flush=True)
         out.append(np.load(path)[d["file_row"][d["trial"] == i]])
@@ -81,14 +84,25 @@ class Judge(nn.Module):
         return self.net(torch.cat([ctx, chunk.flatten(1)], 1))[:, 0]
 
 
-def inputs(d, feats, views=VIEWS, dims=IMAGE_DIMS):
-    """ctx (R, IMAGE_DIMS image directions + state + plant one-hot), chunks (R, K, LOOKAHEAD, 7) minus the mean of the K:
+def directions(x, dims):
+    """x (N, width) -> x on its dims main directions (PCA), (N, dims)."""
+    x = x - x.mean(0)
+    return x @ np.linalg.eigh(x.T @ x)[1][:, ::-1][:, :dims]
+
+
+def inputs(d, feats, views=VIEWS, dims=IMAGE_DIMS, grid=GRID):
+    """ctx (R, image features + state + plant one-hot), chunks (R, K, LOOKAHEAD, 7) minus the mean of the K:
     the K are near alike, raw their difference is lost (probe: pour start's gap closed 0.05 -> 0.34).
-    The directions are fit on every replan's images (no labels involved), so all folds share them."""
-    width = feats.shape[1] // len(CAMERAS)  # features() concatenates the cameras in CAMERAS' order
-    feats = np.concatenate([feats[:, i * width:(i + 1) * width] for i, cam in enumerate(CAMERAS) if cam in views] or [feats[:, :0]], 1)
-    feats = feats - feats.mean(0)
-    feats = feats @ np.linalg.svd(feats, full_matrices=False)[2][:dims].T
+    Image features: grid: per camera, every token on its dims main directions (fit over all its tokens), flattened in
+    grid order (tokens x dims); else the tokens' mean, cameras side by side, on its dims main directions. The directions
+    are fit on every replan's images (no labels involved), so all folds share them."""
+    cams = [i for i, cam in enumerate(CAMERAS) if cam in views]
+    R, _, T, W = feats.shape
+    if grid:
+        img = [directions(feats[:, i].reshape(-1, W).astype(np.float32), dims).reshape(R, T * dims) for i in cams]
+    else:
+        img = [directions(feats[:, cams].astype(np.float32).mean(2).reshape(R, -1), dims)] if cams else []
+    feats = np.concatenate(img or [np.zeros((R, 0), np.float32)], 1)
     plant = np.stack([d["plant"] == p for p in ev.PLANTS], 1).astype(np.float32)
     chunks = d["chunks"][:, :, :LOOKAHEAD].astype(np.float32)
     return np.concatenate([feats, d["state"], plant], 1).astype(np.float32), chunks - chunks.mean(1, keepdims=True)
@@ -201,16 +215,16 @@ def main():
 
     if os.environ.get("ABLATE"):
         table = {}
-        for views, dims in ABLATIONS:
-            name = f"{'+'.join(CAMERAS[v] for v in views) or 'no images'} · {dims}"
-            ctx, chunks = inputs(d, feats, views, dims)
+        for views, dims, grid in ABLATIONS:
+            name = f"{'+'.join(CAMERAS[v] for v in views) or 'no images'} · {dims}{' per patch' if grid else ''}"
+            ctx, chunks = inputs(d, feats, views, dims, grid)
             pred, _ = cross_validate(d, ctx, chunks, s, rel, w, decisive)
             table[name] = {k: evaluate(s, pred, m).get("gap_closed") for k, m in
                            dict(decisive=decisive, **{p: (d["phase"] == p) & decisive for p in PHASES}).items()}
         (OUT / "ablation.json").write_text(json.dumps(table, indent=2))
-        print("gap closed on decisive replans\n" + f"{'':34}" + "".join(f"{k:>12}" for k in ["all", *PHASES]))
+        print("gap closed on decisive replans\n" + f"{'':44}" + "".join(f"{k:>12}" for k in ["all", *PHASES]))
         for name, r in table.items():
-            print(f"{name:34}" + "".join(f"{r[k] if r[k] is not None else '-':>12}" for k in ["decisive", *PHASES]))
+            print(f"{name:44}" + "".join(f"{r[k] if r[k] is not None else '-':>12}" for k in ["decisive", *PHASES]))
         print(f"-> {OUT / 'ablation.json'}")
         return
 
