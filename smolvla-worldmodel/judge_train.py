@@ -14,6 +14,7 @@ score like the best of K or like a random one, overall and per phase? Then a fin
 
 Usage: ./run judge-train
        ABLATE=1 ./run judge-train   cross-validate every ABLATIONS setting -> ablation.json (no judge saved)
+       CURVE=1 ./run judge-train    gap closed vs share of training trials: would more data help? -> curve.json
 """
 import json
 import os
@@ -46,6 +47,9 @@ GRID = False            # keep the token grid (each token cut to IMAGE_DIMS) ins
 MAIN, WRIST = CAMERAS
 ABLATIONS = [((WRIST,), 2, True), ((WRIST,), 4, True), ((WRIST,), 8, True), ((MAIN,), 4, True),
              ((MAIN, WRIST), 4, True)]  # (VIEWS, IMAGE_DIMS, GRID) ABLATE=1 compares
+CURVE = ((), 0, False)  # (VIEWS, IMAGE_DIMS, GRID) CURVE=1 trains on a share of the trials: no images, the simplest
+SHARES = (0.25, 0.5, 0.75, 1.0)  # of each fold's training trials
+CURVE_SEEDS = 3         # random subsets per share, averaged: one is too noisy
 
 
 def features(d):
@@ -190,12 +194,15 @@ def plot(curves, res, rel, pred, decisive, path):
     fig.savefig(path, dpi=110)
 
 
-def cross_validate(d, ctx, chunks, s, rel, w, decisive):
-    """FOLDS-fold by trial: every replan predicted by a judge that never saw its trial -> predictions (R, K), loss curves."""
+def cross_validate(d, ctx, chunks, s, rel, w, decisive, share=1.0, seed=SEED):
+    """FOLDS-fold by trial: every replan predicted by a judge that never saw its trial -> predictions (R, K), loss curves.
+    share: of each fold's training trials used (a random subset, by seed); the held-out trials stay the same."""
     trials = np.random.default_rng(SEED).permutation(d["trial"].max() + 1)
     pred, curves = np.zeros_like(rel), []
     for k, fold in enumerate(np.array_split(trials, FOLDS)):
-        te, tr = np.flatnonzero(np.isin(d["trial"], fold)), np.flatnonzero(~np.isin(d["trial"], fold))
+        rest = np.setdiff1d(trials, fold)
+        rest = np.random.default_rng(seed).choice(rest, round(share * len(rest)), replace=False)
+        te, tr = np.flatnonzero(np.isin(d["trial"], fold)), np.flatnonzero(np.isin(d["trial"], rest))
         model, norm, c = train(ctx, chunks, rel, w, tr, te)
         pred[te] = predict(model, norm, ctx[te], chunks[te])
         curves.append(c)
@@ -226,6 +233,24 @@ def main():
         for name, r in table.items():
             print(f"{name:44}" + "".join(f"{r[k] if r[k] is not None else '-':>12}" for k in ["decisive", *PHASES]))
         print(f"-> {OUT / 'ablation.json'}")
+        return
+
+    if os.environ.get("CURVE"):
+        ctx, chunks = inputs(d, feats, *CURVE)
+        table = {}
+        for share in SHARES:
+            runs = []
+            for seed in range(CURVE_SEEDS):
+                pred, _ = cross_validate(d, ctx, chunks, s, rel, w, decisive, share, seed)
+                runs.append([evaluate(s, pred, m).get("gap_closed") or 0 for m in
+                             [decisive, *((d["phase"] == p) & decisive for p in PHASES)]])
+            table[share] = dict(zip(["decisive", *PHASES], np.round(np.mean(runs, 0), 3).tolist()))
+        (OUT / "curve.json").write_text(json.dumps(table, indent=2))
+        print(f"gap closed on decisive replans, mean of {CURVE_SEEDS} subsets\n{'share of trials':18}"
+              + "".join(f"{k:>12}" for k in ["all", *PHASES]))
+        for share, r in table.items():
+            print(f"{share:<18}" + "".join(f"{v:>12}" for v in r.values()))
+        print(f"-> {OUT / 'curve.json'}")
         return
 
     ctx, chunks = inputs(d, feats)
