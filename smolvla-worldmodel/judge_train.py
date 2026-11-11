@@ -37,7 +37,8 @@ BATCH = 512             # (replan, chunk) pairs per step
 LR = 1e-3
 WEIGHT_DECAY = 1e-2
 FEATURE_BATCH = 32      # replans per pass through the vision encoder
-IMAGE_DIMS = 0          # image features kept (PCA). 64 memorized the trials (pour start 0.18 vs 0.34 without; held-out loss flat)
+IMAGE_DIMS = 64         # image features kept (PCA); both views at 64 memorized the trials (held-out loss flat)
+VIEWS = ("observation.images.image",)  # cameras the judge sees: the main view (both: pour start 0.18, none: 0.34)
 
 
 def features(d):
@@ -80,6 +81,8 @@ def inputs(d, feats):
     """ctx (R, IMAGE_DIMS image directions + state + plant one-hot), chunks (R, K, LOOKAHEAD, 7) minus the mean of the K:
     the K are near alike, raw their difference is lost (probe: pour start's gap closed 0.05 -> 0.34).
     The directions are fit on every replan's images (no labels involved), so all folds share them."""
+    width = feats.shape[1] // len(CAMERAS)  # features() concatenates the cameras in CAMERAS' order
+    feats = np.concatenate([feats[:, i * width:(i + 1) * width] for i, cam in enumerate(CAMERAS) if cam in VIEWS], 1)
     feats = feats - feats.mean(0)
     feats = feats @ np.linalg.svd(feats, full_matrices=False)[2][:IMAGE_DIMS].T
     plant = np.stack([d["plant"] == p for p in ev.PLANTS], 1).astype(np.float32)
