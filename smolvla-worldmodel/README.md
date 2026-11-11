@@ -44,6 +44,16 @@ Result (60 seeds): plain 30/40 held mugs watered (7.4 drops), cheat 40/41 (9.4);
 ## Controls
 
 - **A, random of 8** (`./run pour-random`): the cheat's 8 look-aheads, then a random one runs. Should equal plain: the cheat's gain is the choice, not the resampling or the rewinds. Result: 31/46 held mugs watered (6.9 drops); paired on the 34 trials both carried, plain 26, random 25. It does: the gain is the choice.
-- **B, the cheat distilled** (`distill.py`): the cheat pours at the trained spots 1-4 (DAgger's seeds and jitter), recorded from the carry on like a DAgger takeover; the watered ones join dagger1's data and dagger1 trains 8k steps more (`…-dagger1-cheat`). Pour-tested on spots 5-8 (`./run pour-distilled`). Near the cheat's 40/41: no judge needed at run time.
+- **B, the cheat distilled** (`distill.py`): the cheat pours at the trained spots 1-4 (DAgger's seeds and jitter), recorded from the carry on like a DAgger takeover; the watered ones join dagger1's data and dagger1 trains 8k steps more (`…-dagger1-cheat`). Pour-tested on spots 5-8 (`./run pour-distilled`). Near the cheat's 40/41: no judge needed at run time. Result: 29/47 (6.1 drops). B2, the pours repeated 5× (`…-dagger1-cheat5`, `./run distill-upweight`): 32/42 (7.3). Both = plain: the cheat's pours don't transfer by fine-tuning; the gain needs a choice at run time.
+
+## Outcome judge
+
+A learned version of the cheat's score, from the cameras instead of the sim.
+
+1. `./run judge-record` (`judge.py`): 120 pour trials at the trained spots 1-4 where a random one of the 8 chunks runs, so the states are the plain policy's, bad ones included. At every replan it saves both camera frames, the state, the 8 chunks and, per chunk, what the cheat measured after 1 s.
+   Result: 110 carried trials, 2,213 replans. The 8 chunks differ (best beats worst by a drop or more) in only 8.5% of replans, about 190, all during the tip; there the best gains ~2 drops over the one that ran.
+2. `./run judge-full` (`judge_full.py`): the same at every replan of whole episodes (grasp, pour, put back), so the judge can run everywhere at test with no phase signal. The phase only sets the labels. Look-ahead: 3 s (the chunk, then 2 s of the plain policy) in the grasp, the start of the pour (carried, tilt < 20°) and the put-back, whose effect shows late; 1 s at the tip. Score, always −100 if the mug ends knocked over: grasp, the hand's distance to the mug and how far the held mug is up; pour, the cheat's water score; put-back, the mug's distance from where it stood, +50 if placed as the eval counts it.
+3. `./run judge-check` (`judge_check.py`): both recordings; share of decisive replans per phase, when in the episode, the most decisive examples -> `results/judge/<model>/check.png`.
+4. `./run judge-train` (`judge_train.py`): both cameras through SmolVLA's own frozen vision encoder (mean of its image tokens, 64 PCA directions) + state + plant + the chunk's 20 actions -> MLP -> the chunk's score minus the mean of its 8 (only the ranking matters for choosing; where the 8 are equal the target is 0). All phases; 5-fold cross-validation by trial; reported as the share of the gap between a random pick and the best of 8 the judge's pick closes, per phase -> `judge.pt`, `judge.png`.
 
 Plan: https://claude.ai/artifact/CXUSRic5UALTvam4SzRcDN

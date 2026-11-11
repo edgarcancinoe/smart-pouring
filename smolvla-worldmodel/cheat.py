@@ -20,7 +20,7 @@ import eval_relative  # noqa: F401 (at import: evaluate's scene, reset and load_
 import eval_grasp_position as egp
 import evaluate as ev
 import grasp_position as gp
-from dataset.export_lerobot import CAMERAS
+from dataset.export_lerobot import CAMERAS, observe
 from sim.watering.assets import MUG, POTS_DIMS
 
 ARM = os.environ.get("ARM", "cheat")  # "cheat", "distance" (the cheat scored by distance only), "random" (a random one of the K) or "plain" (env var so the workers see it)
@@ -60,7 +60,8 @@ def restore(e, snap):
 
 
 def state(e):
-    """Mug vs target pot now: mouth offset (cm, xyz), tilt (deg), drops in the mug / over the target pot / elsewhere."""
+    """Mug vs target pot now: mouth offset (cm, xyz), tilt (deg), drops in the mug / over the target pot / elsewhere,
+    the gripper point's distance to the mug (cm), the mug's distance from where it stood (cm: xy, height)."""
     pos, rot, _ = ev.mug_pose(e)
     pot = e.sim.data.body_xpos[e.obj_body_id[e.target_pot]]
     dims = POTS_DIMS[e.target_pot.split("_")[-1]]
@@ -71,8 +72,12 @@ def state(e):
     out[np.argsort(np.linalg.norm(drops - pos, axis=1))[:in_mug]] = False  # shortcut: the in_mug nearest the mug are the ones in it
     over = out & (np.linalg.norm(drops[:, :2] - pot[:2], axis=1) < dims.get("r_in_top", dims["r_in"]))  # in the pot or falling into it
     tilt = np.degrees(np.arccos(np.clip(rot.apply([0, 0, 1])[2], -1, 1)))
+    hand = e.sim.data.site_xpos[e.robots[0].eef_site_id]
     return dict(mouth_cm=np.round((mouth - pot) * 100, 1).tolist(), tilt=round(float(tilt), 1),
-                in_mug=int(in_mug), over=int(over.sum()), elsewhere=int((out & ~over).sum()))
+                in_mug=int(in_mug), over=int(over.sum()), elsewhere=int((out & ~over).sum()),
+                hand_cm=round(float(np.linalg.norm(hand - pos)) * 100, 1),
+                home_cm=round(float(np.linalg.norm(pos[:2] - _run["start"][:2])) * 100, 1),
+                up_cm=round(float(pos[2] - _run["start"][2]) * 100, 1))
 
 
 def score(s):
@@ -84,11 +89,29 @@ def score(s):
     return drops - float(np.linalg.norm(s["mouth_cm"][:2]))
 
 
-def lookahead(env, chunk):
-    """Run the chunk's first LOOKAHEAD actions; returns the state after them and [gripper xyz, droplet xyz...] (m)."""
+def look(s):
+    """Whether to sample K chunks and look ahead at this replan (s: state() now): after the lift, while there is water.
+    judge_full.py: at every replan."""
+    return _run["lifted"] and s["in_mug"] > 0
+
+
+def horizon(s):
+    """Steps of the plain policy run after a chunk's LOOKAHEAD actions before scoring it (s: state() now).
+    judge_full.py: more at the start of the pour, whose effect shows later than 1 s."""
+    return 0
+
+
+def lookahead(env, chunk, extra=0, model=None, task=None):
+    """Run the chunk's first LOOKAHEAD actions, then extra steps of the plain policy (model, task: for those);
+    returns the state after them and [gripper xyz, droplet xyz...] (m)."""
     _run["looking"] = True  # distill.py records only the steps really run
     for a in chunk[:LOOKAHEAD]:
         obs, *_ = env.step(a)
+    queue = []
+    for _ in range(extra):
+        if not queue:
+            queue = list(_act(model, observe(env.env), task))
+        obs, *_ = env.step(queue.pop(0))
     _run["looking"] = False
     return state(env.env), np.r_[obs["robot0_eef_pos"], env.env.droplet_positions().ravel()]
 
@@ -126,7 +149,7 @@ def _choose(model, frame, task):
     _run["lifted"] |= carried(e)
     entry = dict(step=int(e.timestep), **s, **grip(e))
     _run["log"].append(entry)
-    if ARM == "plain" or not _run["lifted"] or s["in_mug"] == 0:
+    if ARM == "plain" or not look(s):
         return _act(model, frame, task)
 
     policy, pre, post = model
@@ -136,16 +159,16 @@ def _choose(model, frame, task):
     with torch.inference_mode():
         chunks = post(policy.predict_action_chunk(pre(batch))).cpu().numpy()  # (K, 50, 7), K noise draws
 
-    snap = snapshot(e)
+    snap, extra = snapshot(e), horizon(s)
     if "rewind_mm" not in _run:  # once per trial: the same chunk twice from the same state must end the same
         ends = []
         for _ in range(2):
-            ends.append(lookahead(env, chunks[0])[1])
+            ends.append(lookahead(env, chunks[0], extra, model, task)[1])
             restore(e, snap)
         _run["rewind_mm"] = round(float(np.abs(ends[0] - ends[1]).max() * 1000), 3)  # gripper or any droplet; 0 = exact
     ends, scores, outcomes = [], [], []
     for c in chunks:
-        s_end, end = lookahead(env, c)
+        s_end, end = lookahead(env, c, extra, model, task)
         restore(e, snap)
         ends.append(end[:3])
         scores.append(score(s_end))

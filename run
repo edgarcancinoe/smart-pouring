@@ -47,6 +47,9 @@
 #   ./run pour-distilled [--jobs 30]  the pour-only benchmark of that model -> results/pour-plain/<model>/
 #   ./run distill-upweight         B2: the same data with the cheat pours 5x -> Hub (then ./run train <model>5, ./run pour-plain <model>5)
 #   ./run judge-record [--jobs 8]  outcome judge data: pours at spots 1-4, a random chunk runs, all K scored -> results/judge-data/
+#   ./run judge-full [--jobs 8]    outcome judge data, whole episodes at spots 1-4 (3 s look-ahead at the pour start) -> results/judge-full/
+#   ./run judge-check              is there a choice to learn, and in which phase? both recordings -> results/judge/<model>/check.png
+#   ./run judge-train              the outcome judge (frozen SmolVLA image features + MLP), 5-fold by trial -> judge.pt, judge.png
 
 cd "$(dirname "$0")" || exit 1
 export PYTHONPATH=. PYTHONWARNINGS=ignore PYTHONUNBUFFERED=1
@@ -90,6 +93,9 @@ case "$cmd" in
   pour-plain)  OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 ARM=plain PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions:smolvla-worldmodel MUJOCO_GL=$gl exec $py smolvla-worldmodel/pour.py "$@" ;;
   pour-distance) OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 ARM=distance PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions:smolvla-worldmodel MUJOCO_GL=$gl exec $py smolvla-worldmodel/pour.py "$@" ;;
   pour-random) OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 ARM=random PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions:smolvla-worldmodel MUJOCO_GL=$gl exec $py smolvla-worldmodel/pour.py "$@" ;;
+  judge-full) OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 ARM=random PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions:smolvla-worldmodel MUJOCO_GL=$gl exec $py smolvla-worldmodel/judge_full.py "$@" ;;
+  judge-check) PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions:smolvla-worldmodel MUJOCO_GL=$gl exec $py smolvla-worldmodel/judge_check.py "$@" ;;
+  judge-train) PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions:smolvla-worldmodel MUJOCO_GL=$gl exec $py smolvla-worldmodel/judge_train.py "$@" ;;
   judge-record) OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 ARM=random PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions:smolvla-worldmodel MUJOCO_GL=$gl exec $py smolvla-worldmodel/judge.py "$@" ;;
   distill)     OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 ARM=cheat PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions:smolvla-worldmodel:smolvla-recoveries/DAgger MUJOCO_GL=$gl exec $py smolvla-worldmodel/distill.py "$@" ;;
   distill-export) OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 ARM=cheat PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions:smolvla-worldmodel:smolvla-recoveries/DAgger MUJOCO_GL=$gl exec $py smolvla-worldmodel/distill.py --export ;;
@@ -97,5 +103,5 @@ case "$cmd" in
   pour-distilled) OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 ARM=plain MODEL=libero-4s-dart-full-xxl-sd-rel-b64-dagger1-cheat PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions:smolvla-worldmodel MUJOCO_GL=$gl exec $py smolvla-worldmodel/pour.py "$@" ;;
   pour-film)   OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 ARM=plain PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions:smolvla-worldmodel MUJOCO_GL=$gl exec $py smolvla-worldmodel/film.py "$@" ;;
   *)         [ -f sim/tools/run ] && . sim/tools/run  # local-only commands, if present (gitignored)
-             sed -n '2,49p' "$0" | sed 's/^# //' ;;
+             sed -n '2,52p' "$0" | sed 's/^# //' ;;
 esac
