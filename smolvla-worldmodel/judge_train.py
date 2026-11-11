@@ -1,7 +1,7 @@
 """Outcome judge, step 3: learn which of SmolVLA's K chunks is better, from the cameras, without the simulator.
 
 Per replan: both cameras through the policy's own frozen vision encoder (SmolVLA's SigLIP + connector, mean over its
-image tokens, cut to their IMAGE_DIMS main directions), the state and the plant; per chunk: its first LOOKAHEAD actions. An MLP predicts the chunk's relative
+image tokens, cut to their IMAGE_DIMS main directions), the state and the plant; per chunk: its first LOOKAHEAD actions minus the K's mean. An MLP predicts the chunk's relative
 score: its score (judge_check.score, by phase) minus the mean of the K at that replan. Choosing only needs the ranking
 among the K, so the replan's own level (how well the pour is going) is taken out of the target. Every phase and every
 replan is used: where the K are equal the target is 0, no preference; decisive replans are weighted up to
@@ -77,12 +77,14 @@ class Judge(nn.Module):
 
 
 def inputs(d, feats):
-    """ctx (R, IMAGE_DIMS image directions + state + plant one-hot), chunks (R, K, LOOKAHEAD, 7).
+    """ctx (R, IMAGE_DIMS image directions + state + plant one-hot), chunks (R, K, LOOKAHEAD, 7) minus the mean of the K:
+    the K are near alike, raw their difference is lost (probe: pour start's gap closed 0.05 -> 0.34).
     The directions are fit on every replan's images (no labels involved), so all folds share them."""
     feats = feats - feats.mean(0)
     feats = feats @ np.linalg.svd(feats, full_matrices=False)[2][:IMAGE_DIMS].T
     plant = np.stack([d["plant"] == p for p in ev.PLANTS], 1).astype(np.float32)
-    return np.concatenate([feats, d["state"], plant], 1).astype(np.float32), d["chunks"][:, :, :LOOKAHEAD].astype(np.float32)
+    chunks = d["chunks"][:, :, :LOOKAHEAD].astype(np.float32)
+    return np.concatenate([feats, d["state"], plant], 1).astype(np.float32), chunks - chunks.mean(1, keepdims=True)
 
 
 def predict(model, norm, ctx, chunks):
