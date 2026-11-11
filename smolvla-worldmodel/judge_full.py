@@ -20,7 +20,7 @@ from dataset.export_lerobot import CAMERAS
 from judge_check import TIP_DEG  # carried mug tilted at least this: the tip (1 s look-ahead); less: the start of the pour
 
 SPOTS = (1, 2, 3, 4)        # trained spots: 5-8 stay unseen
-TRIALS = range(2, 7)        # per plant x spot (new names and seeds): 60 episodes; the pilot was 0-1
+TRIALS = range(7, 12)       # per plant x spot (new names and seeds): 60 episodes; the pilot was 0-1, the main run 2-6
 LOOK_PHASES = ("pour start", "tip")  # pilot: grasp's choices were mostly distance noise; the put back is left to the policy
 MUG_JITTER = 0.03           # m, as DAgger's rollouts (eval: 0.01)
 SEED = 30_000               # added to evaluate.trial_seed: no eval, distill.py (10_000) or judge.py (20_000) trial's seed
@@ -82,7 +82,7 @@ cheat.horizon = lambda s: HORIZON if phase(s) == "pour start" else 0
 ev.reset, cheat.trial, ev.run_unit = reset, trial, run_unit
 ev.trial_seed = lambda plant, spot, t: SEED + _seed(plant, spot, t)
 cheat.RESULTS = ev.RESULTS = cheat.RESULTS.parent / "judge-full"
-ev.UNITS = [f"{p}-{s}-{t}" for p in ev.PLANTS for s in SPOTS for t in TRIALS]
+ev.UNITS = [f"{p}-{s}-{t}" for t in TRIALS for p in ev.PLANTS for s in SPOTS]  # trial by trial: stopped early, every plant and spot
 if "PART" in os.environ:  # every n-th trial from the k-th: each pod a mix of plants and spots
     k, n = map(int, os.environ["PART"].split("/"))
     ev.UNITS = ev.UNITS[k - 1::n]
