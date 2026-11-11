@@ -37,7 +37,7 @@ BATCH = 512             # (replan, chunk) pairs per step
 LR = 1e-3
 WEIGHT_DECAY = 1e-2
 FEATURE_BATCH = 32      # replans per pass through the vision encoder
-IMAGE_DIMS = 64         # image features kept (PCA): ~2k per replan for a few hundred decisive scenes memorizes the scenes
+IMAGE_DIMS = 0          # image features kept (PCA). 64 memorized the trials (pour start 0.18 vs 0.34 without; held-out loss flat)
 
 
 def features(d):
