@@ -42,7 +42,7 @@ FEATURE_BATCH = 32      # replans per pass through the vision encoder
 IMAGE_DIMS = 64         # image features kept (PCA); both views at 64 memorized the trials (held-out loss flat)
 VIEWS = ("observation.images.image",)  # cameras the judge sees: the main view (both: pour start 0.18, none: 0.34)
 MAIN, WRIST = CAMERAS
-ABLATIONS = [((MAIN,), 32), ((MAIN,), 64), ((MAIN,), 256), ((MAIN, WRIST), 64), ((), 0)]  # (VIEWS, IMAGE_DIMS) ABLATE=1 compares
+ABLATIONS = [((WRIST,), 16), ((WRIST,), 32), ((WRIST,), 64), ((MAIN,), 32), ((MAIN, WRIST), 64), ((), 0)]  # (VIEWS, IMAGE_DIMS) ABLATE=1 compares
 
 
 def features(d):
