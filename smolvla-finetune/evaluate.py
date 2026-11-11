@@ -71,13 +71,16 @@ _cache = {}  # per process: the loaded model and one env per plant
 
 
 def _slot():
-    """This worker's number within the eval run: the first free one, claimed by creating its file."""
+    """This worker's number within the eval run: the first free one, claimed by creating its file (once per process)."""
     for i in range(10 ** 4):
+        if "slot" in _cache:
+            break
         try:
             os.close(os.open(f"/tmp/eval-slot-{os.getppid()}-{i}", os.O_CREAT | os.O_EXCL))
-            return i
+            _cache["slot"] = i
         except FileExistsError:
             pass
+    return _cache["slot"]
 
 
 def load_model(name):
@@ -107,6 +110,8 @@ def load_model(name):
 def scene(plant):
     """The watering env for one command, built once per process; the robot starts in START_Q."""
     if plant not in _cache:
+        if torch.cuda.device_count() > 1:  # render on this worker's GPU too (else every worker renders on EGL device 0)
+            os.environ.setdefault("MUJOCO_EGL_DEVICE_ID", str(_slot() % torch.cuda.device_count()))
         env = watering.make_env(plant, hard_reset=False, initialization_noise=None, use_camera_obs=False,
                                 horizon=10 ** 6, ignore_done=True)
         env.env.robots[0].init_qpos = START_Q
