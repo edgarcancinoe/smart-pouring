@@ -7,7 +7,10 @@ never sees it.
 -> results/judge-full/<model>/data/<unit>.npz
 
 Usage: ./run judge-full [--jobs 8]
+       PART=2/3 ./run judge-full [--jobs 8]   this machine's share of the trials (the 2nd of 3), for several pods
 """
+import os
+
 import numpy as np
 
 import cheat
@@ -78,6 +81,9 @@ ev.reset, cheat.trial, ev.run_unit = reset, trial, run_unit
 ev.trial_seed = lambda plant, spot, t: SEED + _seed(plant, spot, t)
 cheat.RESULTS = ev.RESULTS = cheat.RESULTS.parent / "judge-full"
 ev.UNITS = [f"{p}-{s}-{t}" for p in ev.PLANTS for s in SPOTS for t in TRIALS]
+if "PART" in os.environ:  # every n-th trial from the k-th: each pod a mix of plants and spots
+    k, n = map(int, os.environ["PART"].split("/"))
+    ev.UNITS = ev.UNITS[k - 1::n]
 
 if __name__ == "__main__":
     ev.main()
