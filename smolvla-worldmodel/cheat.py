@@ -103,15 +103,20 @@ def horizon(s):
 
 def lookahead(env, chunk, extra=0, model=None, task=None):
     """Run the chunk's first LOOKAHEAD actions, then extra steps of the plain policy (model, task: for those);
-    returns the state after them and [gripper xyz, droplet xyz...] (m)."""
+    returns the state after them and [gripper xyz, droplet xyz...] (m).
+    The plain policy's noise is seeded by the replan's step: every chunk of a replan gets the same continuation noise,
+    so they differ by the chunk, not by luck; the real rollout's random state is left as it was."""
     _run["looking"] = True  # distill.py records only the steps really run
+    seed = int(env.env.timestep)
     for a in chunk[:LOOKAHEAD]:
         obs, *_ = env.step(a)
     queue = []
-    for _ in range(extra):
-        if not queue:
-            queue = list(_act(model, observe(env.env), task))
-        obs, *_ = env.step(queue.pop(0))
+    with torch.random.fork_rng(devices=range(torch.cuda.device_count())):
+        torch.manual_seed(seed)
+        for _ in range(extra):
+            if not queue:
+                queue = list(_act(model, observe(env.env), task))
+            obs, *_ = env.step(queue.pop(0))
     _run["looking"] = False
     return state(env.env), np.r_[obs["robot0_eef_pos"], env.env.droplet_positions().ravel()]
 

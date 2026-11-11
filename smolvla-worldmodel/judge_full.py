@@ -1,9 +1,10 @@
 """Outcome judge data, whole episodes: grasp -> pour -> put back at the trained spots 1-4, a random one of the K chunks
-runs at every replan (ARM=random: the plain policy's states). At every replan: the camera frames and state, the K
-chunks' first LOOKAHEAD actions and, per chunk, the sim state() after its look-ahead; plus the phase the replan was in
-and the state then. The phase only sets how far each chunk is looked ahead (grasp, start of the pour, put back: HORIZON
-more steps of the plain policy, their effect shows late; the tip: 1 s) and how judge_check.py scores it; the judge
-never sees it.
+runs at every replan of LOOK_PHASES (ARM=random: the plain policy's states; elsewhere the plain policy alone). At
+those replans: the camera frames and state, the K chunks' first LOOKAHEAD actions and, per chunk, the sim state() after
+its look-ahead; plus the phase the replan was in and the state then. The phase only sets how far each chunk is looked
+ahead (the start of the pour: HORIZON more steps of the plain policy, its effect shows late; elsewhere 1 s) and how
+judge_check.py scores it; the judge never sees it.
+The pilot (trials 0-1) looked ahead in every phase, 3 s also in grasp and put back: those rows stay in the data.
 -> results/judge-full/<model>/data/<unit>.npz
 
 Usage: ./run judge-full [--jobs 8]
@@ -19,10 +20,11 @@ from dataset.export_lerobot import CAMERAS
 from judge_check import TIP_DEG  # carried mug tilted at least this: the tip (1 s look-ahead); less: the start of the pour
 
 SPOTS = (1, 2, 3, 4)        # trained spots: 5-8 stay unseen
-TRIALS = range(0, 2)        # per plant x spot; pilot 0-1, then range(2, 27) adds new trials (new names and seeds)
+TRIALS = range(2, 7)        # per plant x spot (new names and seeds): 60 episodes; the pilot was 0-1
+LOOK_PHASES = ("pour start", "tip")  # pilot: grasp's choices were mostly distance noise; the put back is left to the policy
 MUG_JITTER = 0.03           # m, as DAgger's rollouts (eval: 0.01)
 SEED = 30_000               # added to evaluate.trial_seed: no eval, distill.py (10_000) or judge.py (20_000) trial's seed
-HORIZON = 40                # plain-policy steps after the chunk, except at the tip (+ LOOKAHEAD: 3 s)
+HORIZON = 40                # plain-policy steps after the chunk at the start of the pour (+ LOOKAHEAD: 3 s)
 
 _reset, _trial, _run_unit, _seed = ev.reset, cheat.trial, ev.run_unit, ev.trial_seed
 _rec = {}  # this process's trial: unit, one dict per choice
@@ -75,8 +77,8 @@ def run_unit(unit, *args, **kwargs):
 
 # at import, so the spawned eval workers get them too
 cheat.on_choice = on_choice
-cheat.look = lambda s: True
-cheat.horizon = lambda s: 0 if phase(s) == "tip" else HORIZON
+cheat.look = lambda s: phase(s) in LOOK_PHASES
+cheat.horizon = lambda s: HORIZON if phase(s) == "pour start" else 0
 ev.reset, cheat.trial, ev.run_unit = reset, trial, run_unit
 ev.trial_seed = lambda plant, spot, t: SEED + _seed(plant, spot, t)
 cheat.RESULTS = ev.RESULTS = cheat.RESULTS.parent / "judge-full"

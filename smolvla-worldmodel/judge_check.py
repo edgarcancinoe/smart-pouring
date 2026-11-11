@@ -5,9 +5,9 @@ best beats the chunk that ran (a random one), and when in the episode that happe
 
 Scores by phase (how a chunk is labelled; the judge never sees the phase), all - KNOCK if the mug ends knocked over
 and out of the hand:
-  grasp             - the hand's distance to the mug (cm) + LIFT_WEIGHT x cm the held mug is up (to CARRIED_CM)
+  grasp             + LIFTED if the mug ends held and lifted (milestones only: the pilot's distance terms were noise)
   pour start, tip   cheat.score: (drops over the pot - drops elsewhere) x DROP_WEIGHT - the mouth's xy distance (cm)
-  put back          - the mug's distance from where it stood (cm) + PLACED if placed as the eval counts it (released,
+  put back          - HOME_WEIGHT x the mug's distance from where it stood (cm) + PLACED if placed as the eval counts it (released,
                     upright, near its start, on the table), - drops elsewhere x DROP_WEIGHT
 
 The recordings come from results/<recording>/<model>/data/, or from the Hub if they aren't here.
@@ -36,9 +36,9 @@ PHASES = ("grasp", "pour start", "tip", "put back")
 TIP_DEG = 20.0          # carried mug tilted at least this: the tip; less: the start of the pour (judge_full.py too)
 DROP_WEIGHT = 10.0      # cheat.py's score: per drop over the pot (minus per drop elsewhere), vs cm of mouth distance
 KNOCK = 100.0           # score lost if the mug ends knocked over
-LIFT_WEIGHT = 5.0       # grasp: per cm the held mug is up...
-CARRIED_CM = 10.0       # ...counted up to this (higher is no better a grasp)
+LIFTED = 50.0           # grasp: the mug ends held and lifted (evaluate's LIFT_CM)
 PLACED = 50.0           # put back: placed as the eval counts it
+HOME_WEIGHT = 0.2       # put back: per cm from where the mug stood (small: a tie-break, not a choice)
 DECISIVE = 10.0         # score points: a replan where the best of K beats the worst by about a drop or more
 EXAMPLES = 4            # most decisive replans drawn with their camera frame
 
@@ -58,9 +58,9 @@ def score(d):
     released = d["hand_cm"] > ev.RELEASE_CM
     knock = -KNOCK * ((d["tilt"] > ev.TOPPLED_DEG) & released)
     water = DROP_WEIGHT * (d["over"] - d["elsewhere"]) - np.linalg.norm(d["mouth_cm"][..., :2], axis=-1)
-    grasp = -d["hand_cm"] + LIFT_WEIGHT * np.clip(d["up_cm"], 0, CARRIED_CM) * ~released
+    grasp = LIFTED * (~released & (d["up_cm"] >= ev.LIFT_CM))
     placed = released & (d["home_cm"] <= ev.PLACED_CM) & (d["tilt"] <= ev.PLACED_DEG) & (np.abs(d["up_cm"]) < 1)
-    back = -d["home_cm"] + PLACED * placed - DROP_WEIGHT * d["elsewhere"]
+    back = -HOME_WEIGHT * d["home_cm"] + PLACED * placed - DROP_WEIGHT * d["elsewhere"]
     phase = d["phase"][:, None]
     return knock + np.select([phase == "grasp", phase == "put back"], [grasp, back], water)
 

@@ -4,7 +4,8 @@ Per replan: both cameras through the policy's own frozen vision encoder (SmolVLA
 image tokens, cut to their IMAGE_DIMS main directions), the state and the plant; per chunk: its first LOOKAHEAD actions. An MLP predicts the chunk's relative
 score: its score (judge_check.score, by phase) minus the mean of the K at that replan. Choosing only needs the ranking
 among the K, so the replan's own level (how well the pour is going) is taken out of the target. Every phase and every
-replan is used: where the K are equal the target is 0, no preference.
+replan is used: where the K are equal the target is 0, no preference; decisive replans are weighted up to
+DECISIVE_SHARE of the loss.
 
 FOLDS-fold cross-validation by trial: every replan is judged by a model that never saw its trial. Does the judge's pick
 score like the best of K or like a random one, overall and per phase? Then a final judge on all trials
@@ -27,6 +28,7 @@ from judge_check import DECISIVE, MODEL, OUT, PHASES, load, score
 
 LOOKAHEAD = 20          # actions of each chunk the judge sees (cheat.LOOKAHEAD)
 FOLDS = 5               # cross-validation folds, split by trial
+DECISIVE_SHARE = 0.5    # of the loss from decisive replans (~20% of replans; the rest teach no preference)
 SEED = 0
 HIDDEN = 256
 DROPOUT = 0.3            # strong: a few hundred decisive scenes (fake-data check: less overfit, more of the gap closed)
@@ -93,15 +95,17 @@ def predict(model, norm, ctx, chunks):
     return (y * norm["y"]).view(R, K).numpy()
 
 
-def train(ctx, chunks, y, tr, te=None):
-    """Fit a judge on replans tr (and the loss on te per epoch). Returns model, normalization, loss curves."""
+def train(ctx, chunks, y, w, tr, te=None):
+    """Fit a judge on replans tr, each weighted by w (R,), and the loss on te per epoch. Returns model, normalization,
+    loss curves."""
     torch.manual_seed(SEED)
     stat = lambda x: (torch.from_numpy(x.mean(0)), torch.from_numpy(x.std(0) + 1e-6))
     norm = dict(ctx=stat(ctx[tr]), chunk=stat(chunks[tr].reshape(-1, *chunks.shape[2:])), y=float(y[tr].std() + 1e-6))
     K = chunks.shape[1]
     tensors = lambda idx: ((torch.from_numpy(ctx[np.repeat(idx, K)]) - norm["ctx"][0]) / norm["ctx"][1],
                            (torch.from_numpy(chunks[idx].reshape(-1, *chunks.shape[2:])) - norm["chunk"][0]) / norm["chunk"][1],
-                           torch.from_numpy(y[idx].reshape(-1).astype(np.float32)) / norm["y"])
+                           torch.from_numpy(y[idx].reshape(-1).astype(np.float32)) / norm["y"],
+                           torch.from_numpy(np.repeat(w[idx], K).astype(np.float32)))
     train_set, test_set = tensors(tr), tensors(te) if te is not None else None
     model = Judge(ctx.shape[1] + LOOKAHEAD * chunks.shape[-1])
     opt = torch.optim.AdamW(model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
@@ -111,8 +115,8 @@ def train(ctx, chunks, y, tr, te=None):
         model.train()
         order, losses = torch.randperm(len(train_set[0])), []
         for b in range(0, len(order), BATCH):
-            c, a, t = (x[order[b:b + BATCH]] for x in train_set)
-            loss = nn.functional.mse_loss(model(c, a), t)
+            c, a, t, wt = (x[order[b:b + BATCH]] for x in train_set)
+            loss = (wt * (model(c, a) - t) ** 2).mean()
             opt.zero_grad()
             loss.backward()
             opt.step()
@@ -169,12 +173,13 @@ def main():
     s = score(d)
     rel = (s - s.mean(1, keepdims=True)).astype(np.float32)
     decisive = s.max(1) - s.min(1) >= DECISIVE
+    w = len(s) * np.where(decisive, DECISIVE_SHARE / max(decisive.sum(), 1), (1 - DECISIVE_SHARE) / max((~decisive).sum(), 1))  # mean 1
 
     trials = np.random.default_rng(SEED).permutation(d["trial"].max() + 1)
     pred, curves = np.zeros_like(rel), []
     for k, fold in enumerate(np.array_split(trials, FOLDS)):
         te, tr = np.flatnonzero(np.isin(d["trial"], fold)), np.flatnonzero(~np.isin(d["trial"], fold))
-        model, norm, c = train(ctx, chunks, rel, tr, te)
+        model, norm, c = train(ctx, chunks, rel, w, tr, te)
         pred[te] = predict(model, norm, ctx[te], chunks[te])
         curves.append(c)
         print(f"fold {k + 1}/{FOLDS}: train {c['train'][-1]:.3f} · held-out {c['test'][-1]:.3f} · "
@@ -183,7 +188,7 @@ def main():
     res = dict(all=evaluate(s, pred, np.ones(len(s), bool)), decisive=evaluate(s, pred, decisive),
                **{p: evaluate(s, pred, d["phase"] == p) for p in PHASES},
                **{f"{p} · decisive": evaluate(s, pred, (d["phase"] == p) & decisive) for p in PHASES})
-    model, norm, _ = train(ctx, chunks, rel, np.arange(len(s)))  # the judge to use: every trial
+    model, norm, _ = train(ctx, chunks, rel, w, np.arange(len(s)))  # the judge to use: every trial
     OUT.mkdir(parents=True, exist_ok=True)
     torch.save(dict(state_dict=model.state_dict(), norm=norm, n_in=ctx.shape[1] + LOOKAHEAD * chunks.shape[-1],
                     model=MODEL, lookahead=LOOKAHEAD), OUT / "judge.pt")
