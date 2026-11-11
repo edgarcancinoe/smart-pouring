@@ -50,6 +50,7 @@
 #   ./run judge-full [--jobs 8]    outcome judge data, whole episodes at spots 1-4 (3 s look-ahead at the pour start) -> results/judge-full/
 #   ./run judge-check              is there a choice to learn, and in which phase? both recordings -> results/judge/<model>/check.png
 #   ./run judge-train              the outcome judge (frozen SmolVLA image features + MLP), 5-fold by trial -> judge.pt, judge.png
+#   ABLATE=1 ./run judge-train     the judge with/without each camera and image size, side by side -> ablation.json
 
 cd "$(dirname "$0")" || exit 1
 export PYTHONPATH=. PYTHONWARNINGS=ignore PYTHONUNBUFFERED=1
@@ -103,5 +104,5 @@ case "$cmd" in
   pour-distilled) OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 ARM=plain MODEL=libero-4s-dart-full-xxl-sd-rel-b64-dagger1-cheat PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions:smolvla-worldmodel MUJOCO_GL=$gl exec $py smolvla-worldmodel/pour.py "$@" ;;
   pour-film)   OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 ARM=plain PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions:smolvla-worldmodel MUJOCO_GL=$gl exec $py smolvla-worldmodel/film.py "$@" ;;
   *)         [ -f sim/tools/run ] && . sim/tools/run  # local-only commands, if present (gitignored)
-             sed -n '2,52p' "$0" | sed 's/^# //' ;;
+             sed -n '2,53p' "$0" | sed 's/^# //' ;;
 esac

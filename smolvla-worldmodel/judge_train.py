@@ -12,8 +12,10 @@ score like the best of K or like a random one, overall and per phase? Then a fin
 -> results/judge/<model>/judge.pt (weights + normalization), judge.json, judge.png.
 
 Usage: ./run judge-train
+       ABLATE=1 ./run judge-train   cross-validate every ABLATIONS setting -> ablation.json (no judge saved)
 """
 import json
+import os
 
 import matplotlib
 matplotlib.use("Agg")
@@ -39,6 +41,8 @@ WEIGHT_DECAY = 1e-2
 FEATURE_BATCH = 32      # replans per pass through the vision encoder
 IMAGE_DIMS = 64         # image features kept (PCA); both views at 64 memorized the trials (held-out loss flat)
 VIEWS = ("observation.images.image",)  # cameras the judge sees: the main view (both: pour start 0.18, none: 0.34)
+MAIN, WRIST = CAMERAS
+ABLATIONS = [((MAIN,), 32), ((MAIN,), 64), ((MAIN,), 256), ((MAIN, WRIST), 64), ((), 0)]  # (VIEWS, IMAGE_DIMS) ABLATE=1 compares
 
 
 def features(d):
@@ -77,14 +81,14 @@ class Judge(nn.Module):
         return self.net(torch.cat([ctx, chunk.flatten(1)], 1))[:, 0]
 
 
-def inputs(d, feats):
+def inputs(d, feats, views=VIEWS, dims=IMAGE_DIMS):
     """ctx (R, IMAGE_DIMS image directions + state + plant one-hot), chunks (R, K, LOOKAHEAD, 7) minus the mean of the K:
     the K are near alike, raw their difference is lost (probe: pour start's gap closed 0.05 -> 0.34).
     The directions are fit on every replan's images (no labels involved), so all folds share them."""
     width = feats.shape[1] // len(CAMERAS)  # features() concatenates the cameras in CAMERAS' order
-    feats = np.concatenate([feats[:, i * width:(i + 1) * width] for i, cam in enumerate(CAMERAS) if cam in VIEWS], 1)
+    feats = np.concatenate([feats[:, i * width:(i + 1) * width] for i, cam in enumerate(CAMERAS) if cam in views] or [feats[:, :0]], 1)
     feats = feats - feats.mean(0)
-    feats = feats @ np.linalg.svd(feats, full_matrices=False)[2][:IMAGE_DIMS].T
+    feats = feats @ np.linalg.svd(feats, full_matrices=False)[2][:dims].T
     plant = np.stack([d["plant"] == p for p in ev.PLANTS], 1).astype(np.float32)
     chunks = d["chunks"][:, :, :LOOKAHEAD].astype(np.float32)
     return np.concatenate([feats, d["state"], plant], 1).astype(np.float32), chunks - chunks.mean(1, keepdims=True)
@@ -172,14 +176,8 @@ def plot(curves, res, rel, pred, decisive, path):
     fig.savefig(path, dpi=110)
 
 
-def main():
-    d = load(images=False)
-    ctx, chunks = inputs(d, features(d))
-    s = score(d)
-    rel = (s - s.mean(1, keepdims=True)).astype(np.float32)
-    decisive = s.max(1) - s.min(1) >= DECISIVE
-    w = len(s) * np.where(decisive, DECISIVE_SHARE / max(decisive.sum(), 1), (1 - DECISIVE_SHARE) / max((~decisive).sum(), 1))  # mean 1
-
+def cross_validate(d, ctx, chunks, s, rel, w, decisive):
+    """FOLDS-fold by trial: every replan predicted by a judge that never saw its trial -> predictions (R, K), loss curves."""
     trials = np.random.default_rng(SEED).permutation(d["trial"].max() + 1)
     pred, curves = np.zeros_like(rel), []
     for k, fold in enumerate(np.array_split(trials, FOLDS)):
@@ -189,12 +187,39 @@ def main():
         curves.append(c)
         print(f"fold {k + 1}/{FOLDS}: train {c['train'][-1]:.3f} · held-out {c['test'][-1]:.3f} · "
               f"gap closed (decisive) {evaluate(s[te], pred[te], decisive[te]).get('gap_closed')}", flush=True)
+    return pred, curves
 
+
+def main():
+    d = load(images=False)
+    feats = features(d)
+    s = score(d)
+    rel = (s - s.mean(1, keepdims=True)).astype(np.float32)
+    decisive = s.max(1) - s.min(1) >= DECISIVE
+    w = len(s) * np.where(decisive, DECISIVE_SHARE / max(decisive.sum(), 1), (1 - DECISIVE_SHARE) / max((~decisive).sum(), 1))  # mean 1
+    OUT.mkdir(parents=True, exist_ok=True)
+
+    if os.environ.get("ABLATE"):
+        table = {}
+        for views, dims in ABLATIONS:
+            name = f"{'+'.join(CAMERAS[v] for v in views) or 'no images'} · {dims}"
+            ctx, chunks = inputs(d, feats, views, dims)
+            pred, _ = cross_validate(d, ctx, chunks, s, rel, w, decisive)
+            table[name] = {k: evaluate(s, pred, m).get("gap_closed") for k, m in
+                           dict(decisive=decisive, **{p: (d["phase"] == p) & decisive for p in PHASES}).items()}
+        (OUT / "ablation.json").write_text(json.dumps(table, indent=2))
+        print("gap closed on decisive replans\n" + f"{'':34}" + "".join(f"{k:>12}" for k in ["all", *PHASES]))
+        for name, r in table.items():
+            print(f"{name:34}" + "".join(f"{r[k] if r[k] is not None else '-':>12}" for k in ["decisive", *PHASES]))
+        print(f"-> {OUT / 'ablation.json'}")
+        return
+
+    ctx, chunks = inputs(d, feats)
+    pred, curves = cross_validate(d, ctx, chunks, s, rel, w, decisive)
     res = dict(all=evaluate(s, pred, np.ones(len(s), bool)), decisive=evaluate(s, pred, decisive),
                **{p: evaluate(s, pred, d["phase"] == p) for p in PHASES},
                **{f"{p} · decisive": evaluate(s, pred, (d["phase"] == p) & decisive) for p in PHASES})
     model, norm, _ = train(ctx, chunks, rel, w, np.arange(len(s)))  # the judge to use: every trial
-    OUT.mkdir(parents=True, exist_ok=True)
     torch.save(dict(state_dict=model.state_dict(), norm=norm, n_in=ctx.shape[1] + LOOKAHEAD * chunks.shape[-1],
                     model=MODEL, lookahead=LOOKAHEAD), OUT / "judge.pt")
     (OUT / "judge.json").write_text(json.dumps(res, indent=2))
