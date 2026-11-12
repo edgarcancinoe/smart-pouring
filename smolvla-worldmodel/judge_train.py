@@ -42,8 +42,8 @@ BATCH = 512             # (replan, chunk) pairs per step
 LR = 1e-3
 WEIGHT_DECAY = 1e-2
 FEATURE_BATCH = 32      # replans per pass through the vision encoder
-IMAGE_DIMS = 64         # image features kept (PCA); both views at 64 memorized the trials (held-out loss flat)
-VIEWS = ("observation.images.image",)  # cameras the judge sees: the main view (both: pour start 0.18, none: 0.34)
+IMAGE_DIMS = 0          # image features kept (PCA); both views at 64 memorized the trials (held-out loss flat)
+VIEWS = ()              # cameras the judge sees: none, the best on 252 trials (0.30 of the gap; both cameras, grid: 0.26)
 GRID = False            # keep the token grid (each token cut to IMAGE_DIMS) instead of its mean
 MAIN, WRIST = CAMERAS
 ABLATIONS = [((), 0, False), ((MAIN, WRIST), 4, True)]  # (VIEWS, IMAGE_DIMS, GRID) ABLATE=1 compares: the two best
@@ -264,7 +264,7 @@ def main():
                **{f"{p} · decisive": evaluate(s, pred, (d["phase"] == p) & decisive) for p in PHASES})
     model, norm, _ = train(ctx, chunks, rel, w, np.arange(len(s)))  # the judge to use: every trial
     torch.save(dict(state_dict=model.state_dict(), norm=norm, n_in=ctx.shape[1] + LOOKAHEAD * chunks.shape[-1],
-                    model=MODEL, lookahead=LOOKAHEAD), OUT / "judge.pt")
+                    model=MODEL, lookahead=LOOKAHEAD, views=VIEWS, image_dims=IMAGE_DIMS, grid=GRID), OUT / "judge.pt")
     (OUT / "judge.json").write_text(json.dumps(res, indent=2))
     plot(curves, res, rel, pred, decisive, OUT / "judge.png")
     print(json.dumps(res, indent=2))

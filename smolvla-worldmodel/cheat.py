@@ -5,6 +5,8 @@ it with sim state (drops over the target pot, mug mouth's distance to it), rewin
 N_ACTION_STEPS. Until the lift and once the mug is empty: the plain policy. ARM=plain runs the same trials without
 the cheat, with the same per-replan log (mug vs pot, tilt, drops) -> results/<arm>/<model>/<plant>-<spot>-<trial>.json.
 
+ARM=judge: at the same replans, judge_train.py's judge picks one of the K chunks, no look-ahead.
+
 Usage: ./run cheat [--jobs 8]         the cheat, MODEL, 3 plants x SPOTS x TRIALS
        ./run cheat-plain [--jobs 8]   the same trials, plain policy, logged
 """
@@ -23,7 +25,7 @@ import grasp_position as gp
 from dataset.export_lerobot import CAMERAS, observe
 from sim.watering.assets import MUG, POTS_DIMS
 
-ARM = os.environ.get("ARM", "cheat")  # "cheat", "distance" (the cheat scored by distance only), "random" (a random one of the K) or "plain" (env var so the workers see it)
+ARM = os.environ.get("ARM", "cheat")  # "cheat", "distance" (the cheat scored by distance only), "random" (a random one of the K), "judge" or "plain" (env var so the workers see it)
 MODEL = os.environ.get("MODEL", "libero-4s-dart-full-xxl-sd-rel-b64-dagger1")
 SPOTS = (5, 6, 7, 8)    # unseen spots only
 TRIALS = 3              # per plant x spot, the first 3 seeds of the main eval
@@ -142,6 +144,30 @@ def carried(e):
     return ev.mug_pose(e)[0][2] - _run["start"][2] > ev.LIFT_CM / 100
 
 
+def judge_pick(frame, chunks, task):
+    """ARM=judge: the judge's pick among the K chunks (judge_train.py's judge.pt: here, else from the Hub), from the
+    state, the plant and each chunk minus the K's mean, as it was trained."""
+    if "judge" not in _run:
+        from huggingface_hub import hf_hub_download
+        from judge_check import HUB, OUT
+        from judge_train import Judge
+        path = OUT / "judge.pt"
+        if not path.exists():
+            path = hf_hub_download(HUB, f"worldmodel/judge/{MODEL}/judge.pt", repo_type="dataset")
+        j = torch.load(path, weights_only=False)
+        assert j["image_dims"] == 0, "shortcut: the live judge reads no cameras; retrain with IMAGE_DIMS = 0"
+        model = Judge(j["n_in"])
+        model.load_state_dict(j["state_dict"])
+        _run["judge"] = model.eval(), j["norm"], j["lookahead"]
+    from judge_train import predict
+    model, norm, n = _run["judge"]
+    plant = task.split()[2]  # "Water the <plant> plant"
+    ctx = np.r_[frame["observation.state"], [plant == p for p in ev.PLANTS]][None].astype(np.float32)
+    c = chunks[:, :n].astype(np.float32)
+    scores = predict(model, norm, ctx, (c - c.mean(0))[None])[0]
+    return int(np.argmax(scores)), scores
+
+
 def act(model, frame, task):
     """evaluate.act, logged; after the lift (mug not empty yet) and for ARM=cheat: the best of K chunks."""
     _run["chunk"] = chunk = _choose(model, frame, task)
@@ -163,6 +189,10 @@ def _choose(model, frame, task):
     batch["task"] = [task] * K
     with torch.inference_mode():
         chunks = post(policy.predict_action_chunk(pre(batch))).cpu().numpy()  # (K, 50, 7), K noise draws
+    if ARM == "judge":
+        best, scores = judge_pick(frame, chunks, task)
+        entry.update(scores=np.round(scores, 2).tolist(), pick=best)
+        return chunks[best, :ev.N_ACTION_STEPS]
 
     snap, extra = snapshot(e), horizon(s)
     if "rewind_mm" not in _run:  # once per trial: the same chunk twice from the same state must end the same
