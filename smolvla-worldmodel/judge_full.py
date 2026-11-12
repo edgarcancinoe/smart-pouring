@@ -20,7 +20,7 @@ from dataset.export_lerobot import CAMERAS
 from judge_check import TIP_DEG  # carried mug tilted at least this: the tip (1 s look-ahead); less: the start of the pour
 
 SPOTS = (1, 2, 3, 4)        # trained spots: 5-8 stay unseen
-TRIALS = range(7, 12)       # per plant x spot (new names and seeds): 60 episodes; the pilot was 0-1, the main run 2-6
+TRIALS = range(12, 17)      # per plant x spot (new names and seeds): 60 episodes; pilot 0-1, main run 2-6, then 7-11
 LOOK_PHASES = ("pour start", "tip")  # pilot: grasp's choices were mostly distance noise; the put back is left to the policy
 MUG_JITTER = 0.03           # m, as DAgger's rollouts (eval: 0.01)
 SEED = 30_000               # added to evaluate.trial_seed: no eval, distill.py (10_000) or judge.py (20_000) trial's seed
