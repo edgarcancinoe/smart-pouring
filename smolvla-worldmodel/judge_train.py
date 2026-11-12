@@ -215,7 +215,9 @@ def cross_validate(d, ctx, chunks, s, rel, w, decisive, share=1.0, seed=SEED):
 
 def main():
     d = load(images=False)
-    feats = features(d)
+    settings = ABLATIONS if os.environ.get("ABLATE") else [CURVE] if os.environ.get("CURVE") else [(VIEWS, IMAGE_DIMS, GRID)]
+    uses_images = any(views for views, *_ in settings)  # else skip reading the cached tokens (GBs)
+    feats = features(d) if uses_images else np.zeros((len(d["pick"]), len(CAMERAS), 1, 1), np.float16)
     s = score(d)
     rel = (s - s.mean(1, keepdims=True)).astype(np.float32)
     decisive = s.max(1) - s.min(1) >= DECISIVE

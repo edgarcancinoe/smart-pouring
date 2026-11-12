@@ -73,7 +73,7 @@ def load(images=False):
     parts = []
     for i, f in enumerate(files):
         z = np.load(f)
-        part = {k: z[k] for k in z.files if z[k].ndim and (images or k not in CAMERAS)}
+        part = {k: z[k] for k in z.files if (images or k not in CAMERAS) and z[k].ndim}  # frames: only if asked (slow)
         n = len(part["pick"])
         keep = np.ones(n, bool)
         if "phase" not in part:  # judge.py's
