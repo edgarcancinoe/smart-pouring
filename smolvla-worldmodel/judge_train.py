@@ -45,7 +45,7 @@ IMAGE_DIMS = 64         # image features kept (PCA); both views at 64 memorized 
 VIEWS = ("observation.images.image",)  # cameras the judge sees: the main view (both: pour start 0.18, none: 0.34)
 GRID = False            # keep the token grid (each token cut to IMAGE_DIMS) instead of its mean
 MAIN, WRIST = CAMERAS
-ABLATIONS = [((WRIST,), 2, True), ((WRIST,), 4, True), ((WRIST,), 8, True), ((MAIN,), 4, True),
+ABLATIONS = [((), 0, False), ((MAIN, WRIST), 64, False), ((WRIST,), 4, True), ((MAIN,), 4, True),
              ((MAIN, WRIST), 4, True)]  # (VIEWS, IMAGE_DIMS, GRID) ABLATE=1 compares
 CURVE = ((), 0, False)  # (VIEWS, IMAGE_DIMS, GRID) CURVE=1 trains on a share of the trials: no images, the simplest
 SHARES = (0.25, 0.5, 0.75, 1.0)  # of each fold's training trials
