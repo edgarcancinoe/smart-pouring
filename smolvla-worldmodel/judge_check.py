@@ -10,7 +10,7 @@ and out of the hand:
   put back          - HOME_WEIGHT x the mug's distance from where it stood (cm) + PLACED if placed as the eval counts it (released,
                     upright, near its start, on the table), - drops elsewhere x DROP_WEIGHT
 
-The recordings come from results/<recording>/<model>/data/, or from the Hub if they aren't here.
+The recordings come from the Hub plus results/<recording>/<model>/data/ (not uploaded yet).
 
 Usage: ./run judge-check
 """
@@ -43,14 +43,11 @@ DECISIVE = 10.0         # score points: a replan where the best of K beats the w
 EXAMPLES = 4            # most decisive replans drawn with their camera frame
 
 
-def data_dir(recording):
-    """A recording's folder of <unit>.npz: here, else downloaded from the Hub (None: not recorded yet)."""
-    local = RESULTS / recording / MODEL / "data"
-    if any(local.glob("*.npz")):
-        return local
+def data_files(recording):
+    """A recording's <unit>.npz from the Hub (several pods each upload their part) and from here; here wins on a name."""
     hub = Path(snapshot_download(HUB, repo_type="dataset", allow_patterns=f"worldmodel/{recording}/{MODEL}/data/*"))
-    hub = hub / "worldmodel" / recording / MODEL / "data"
-    return hub if any(hub.glob("*.npz")) else None
+    folders = [hub / "worldmodel" / recording / MODEL / "data", RESULTS / recording / MODEL / "data"]
+    return sorted({f.name: f for folder in folders for f in folder.glob("*.npz")}.values())
 
 
 def score(d):
@@ -71,7 +68,7 @@ def load(images=False):
     shortcut: judge.py's rows have no phase or state then; kept as the tip where a chunk tipped the mug past TIP_DEG
     within its 1 s, else dropped (the start of the pour there was labelled at 1 s); exact once judge_full.py's data
     is all there is"""
-    files = [f for r in RECORDINGS if data_dir(r) for f in sorted(data_dir(r).glob("*.npz"))]
+    files = [f for r in RECORDINGS for f in data_files(r)]
     assert files, "no recording: run ./run judge-full (or ./run judge-record) first"
     parts = []
     for i, f in enumerate(files):
