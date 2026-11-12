@@ -84,7 +84,7 @@ def load(images=False):
         part["file_row"] = np.arange(n)
         part = {k: v[keep] for k, v in part.items()}
         n = int(keep.sum())
-        part.update(trial=np.full(n, i), row=np.arange(n), plant=np.full(n, str(z["plant"])),
+        part.update(trial=np.full(n, i), row=np.arange(n), plant=np.full(n, str(z["plant"])), spot=np.full(n, int(f.stem.split("-")[1])),
                     watered=np.full(n, bool(z["watered"])), recording=np.full(n, f.parent.parent.parent.name))
         parts.append(part)
     keys = set.intersection(*(set(p) for p in parts))

@@ -8,12 +8,21 @@ among the K, so the replan's own level (how well the pour is going) is taken out
 replan is used: where the K are equal the target is 0, no preference; decisive replans are weighted up to
 DECISIVE_SHARE of the loss.
 
-FOLDS-fold cross-validation by trial: every replan is judged by a model that never saw its trial. Does the judge's pick
-score like the best of K or like a random one, overall and per phase? Then a final judge on all trials
+TARGET "outcome" instead: the MLP predicts each chunk's outcome after its look-ahead (OUTCOMES: drops over the pot and
+elsewhere, mouth vs pot, tilt, ...) and judge_check.score rates the prediction; every chunk teaches it, not only the
+decisive replans. FRAME "pot": the hand's position relative to the target pot instead of the table's frame + the plant,
+so a pour looks the same from every spot. EXPERT_DIMS > 0: each chunk also goes through a frozen copy of the policy
+itself (expert()): its action expert reads the chunk against the scene, and the judge gets those activations (cut to
+EXPERT_DIMS main directions) and how unusual the chunk is to the policy (its flow-matching error).
+
+FOLDS-fold cross-validation by trial (SPLIT "spot": train on 3 spots, judge the 4th, as the unseen spots 5-8 are):
+every replan is judged by a model that never saw its trial. Does the judge's pick score like the best of K or like a
+random one, overall and per phase? Then a final judge on all trials
 -> results/judge/<model>/judge.pt (weights + normalization), judge.json, judge.png.
 
 Usage: ./run judge-train
-       ABLATE=1 ./run judge-train   cross-validate every ABLATIONS setting -> ablation.json (no judge saved)
+       ABLATE=1 ./run judge-train   every VARIANTS setting, trained on 3 spots and judged on the 4th -> ablation.json (no judge saved)
+       EXPERT=1 ./run judge-train   the same test for every EXPERT_VARIANTS setting (the policy's own activations) -> expert.json
        CURVE=1 ./run judge-train    gap closed vs share of training trials: would more data help? -> curve.json
 """
 import json
@@ -30,6 +39,7 @@ import evaluate as ev
 import runs
 from dataset.export_lerobot import CAMERAS
 from judge_check import DECISIVE, MODEL, OUT, PHASES, load, score
+from sim.watering.bddl import POTS
 
 LOOKAHEAD = 20          # actions of each chunk the judge sees (cheat.LOOKAHEAD)
 FOLDS = 5               # cross-validation folds, split by trial
@@ -46,7 +56,15 @@ IMAGE_DIMS = 0          # image features kept (PCA); both views at 64 memorized 
 VIEWS = ()              # cameras the judge sees: none, the best on 252 trials (0.30 of the gap; both cameras, grid: 0.26)
 GRID = False            # keep the token grid (each token cut to IMAGE_DIMS) instead of its mean
 MAIN, WRIST = CAMERAS
-ABLATIONS = [((), 0, False), ((MAIN, WRIST), 4, True)]  # (VIEWS, IMAGE_DIMS, GRID) ABLATE=1 compares: the two best
+TARGET = "rank"         # what the MLP predicts per chunk: "rank" (its score minus the K's mean) or "outcome" (OUTCOMES)
+FRAME = "table"         # the hand's position: "table" (as the policy sees it, + the plant) or "pot" (minus the target pot's)
+SPLIT = "trial"         # cross-validation folds: "trial" (FOLDS) or "spot" (one per spot: judged on a spot it never saw)
+OUTCOMES = ("over", "elsewhere", "mouth_cm", "tilt", "hand_cm", "home_cm", "up_cm")  # what judge_check.score reads
+VARIANTS = [("table", "rank"), ("table", "outcome"), ("pot", "rank"), ("pot", "outcome")]  # (FRAME, TARGET) ABLATE=1 compares, SPLIT "spot"
+EXPERT_DIMS = 0         # the policy's own activations per chunk kept (PCA); 0: not used
+EXPERT_VARIANTS = (0, 8, 32, 128)  # EXPERT_DIMS EXPERT=1 compares, SPLIT "spot"
+EXPERT_T = 0.1          # flow-matching time the chunk is read at: mostly the chunk, a little noise (as in training)
+JITTER = {"judge-data": (20_000, 0.03), "judge-full": (30_000, 0.03)}  # recording -> its trial seeds' offset, mug jitter (m)
 CURVE = ((), 0, False)  # (VIEWS, IMAGE_DIMS, GRID) CURVE=1 trains on a share of the trials: no images, the simplest
 SHARES = (0.5, 1.0)     # of each fold's training trials
 CURVE_SEEDS = 3         # random subsets per share, averaged: one is too noisy
@@ -76,16 +94,75 @@ def features(d):
     return np.concatenate(out)
 
 
-class Judge(nn.Module):
-    """(replan context, chunk) -> the chunk's relative score, normalized."""
+def expert(d):
+    """Every recorded chunk through a frozen copy of the policy: its action expert reads the chunk (EXPERT_T: x_t =
+    t noise + (1 - t) chunk, the noise shared by the K) against the scene (cameras, task, state, grasp memory)
+    -> (R, K, expert width + 1): the expert's activations over the chunk's recorded actions (mean) and its
+    flow-matching error there; in load()'s order, cached per recorded trial in features-expert/.
+    shortcut: the grasp memory is rebuilt from the trial's seed as the mug's start xy (the hand grips a few cm off
+    its centre), the recordings don't keep it; the chunk's unrecorded actions (LOOKAHEAD on) are the mean action"""
+    from lerobot.policies.smolvla.modeling_smolvla import make_att_2d_masks
+    from lerobot.utils.constants import OBS_LANGUAGE_ATTENTION_MASK, OBS_LANGUAGE_TOKENS
 
-    def __init__(self, n_in):
+    import eval_relative  # noqa: F401 (the policy's state with its relative grasp slots)
+    import eval_grasp_position as egp
+    import grasp_position as gp
+    from sim.watering.bddl import real_to_sim
+    cache = OUT / "features-expert"
+    cache.mkdir(parents=True, exist_ok=True)
+    out, model = [], None
+    for i, f in enumerate(d["files"]):
+        recording = f.parent.parent.parent.name
+        path = cache / f"{recording}-{f.stem}.npy"
+        if not path.exists():
+            policy, pre, _ = model = model or ev.load_model(MODEL)
+            m, cfg = policy.model, policy.config
+            plant, spot, t = f.stem.split("-")
+            offset, jitter = JITTER[recording]
+            seed = offset + ev.trial_seed(plant, int(spot), int(t))
+            start = np.add(real_to_sim(ev.SPOTS[int(spot)]), np.random.default_rng(seed).uniform(-jitter, jitter, 2))
+            gp.CURRENT = torch.tensor([1, *gp.normalize(start, egp._last["stats"])], dtype=torch.float32)
+            z, rows = np.load(f), []
+            for r in range(len(z["pick"])):
+                K, n = z["chunks"].shape[1], z["chunks"].shape[2]
+                batch = {cam: torch.from_numpy(z[cam][r]).permute(2, 0, 1).float().div(255)[None].repeat(K, 1, 1, 1) for cam in CAMERAS}
+                batch["observation.state"] = torch.from_numpy(z["state"][r])[None].repeat(K, 1)
+                batch["task"] = [f"Water the {plant} plant"] * K
+                batch["action"] = torch.from_numpy(z["chunks"][r]).float()
+                with torch.inference_mode():
+                    b = pre(batch)
+                    images, img_masks = policy.prepare_images(b)
+                    state = policy.prepare_state(b)
+                    actions = torch.zeros(K, cfg.chunk_size, cfg.max_action_dim, device=state.device)
+                    actions[:, :n, :b["action"].shape[-1]] = b["action"]
+                    gen = torch.Generator().manual_seed(seed * 1000 + r)
+                    noise = torch.randn(1, cfg.chunk_size, cfg.max_action_dim, generator=gen).to(state.device).expand(K, -1, -1)
+                    time = torch.full((K,), EXPERT_T, device=state.device)
+                    x_t = EXPERT_T * noise + (1 - EXPERT_T) * actions
+                    pre_e, pre_pad, pre_att = m.embed_prefix(images, img_masks, b[OBS_LANGUAGE_TOKENS], b[OBS_LANGUAGE_ATTENTION_MASK], state=state)
+                    suf_e, suf_pad, suf_att = m.embed_suffix(x_t, time)
+                    pad, att = torch.cat([pre_pad, suf_pad], 1), torch.cat([pre_att, suf_att], 1)
+                    (_, h), _ = m.vlm_with_expert.forward(attention_mask=make_att_2d_masks(pad, att), position_ids=torch.cumsum(pad, 1) - 1,
+                                                          past_key_values=None, inputs_embeds=[pre_e, suf_e], use_cache=False)
+                    h = h[:, -cfg.chunk_size:][:, :n].float()
+                    err = (m.action_out_proj(h) - (noise - actions)[:, :n]).pow(2)[..., :b["action"].shape[-1]].mean((1, 2))
+                    rows.append(torch.cat([h.mean(1), err[:, None]], 1).cpu().numpy())
+            np.save(path, np.stack(rows).astype(np.float16))
+            print(f"expert [{i + 1}/{len(d['files'])}] {recording} {f.stem}", flush=True)
+        out.append(np.load(path)[d["file_row"][d["trial"] == i]])
+    return np.concatenate(out).astype(np.float32)
+
+
+class Judge(nn.Module):
+    """(replan context, chunk) -> the chunk's n_out targets (relative score, or its outcomes), normalized."""
+
+    def __init__(self, n_in, n_out=1):
         super().__init__()
         self.net = nn.Sequential(nn.Linear(n_in, HIDDEN), nn.GELU(), nn.Dropout(DROPOUT),
-                                 nn.Linear(HIDDEN, HIDDEN), nn.GELU(), nn.Dropout(DROPOUT), nn.Linear(HIDDEN, 1))
+                                 nn.Linear(HIDDEN, HIDDEN), nn.GELU(), nn.Dropout(DROPOUT), nn.Linear(HIDDEN, n_out))
 
     def forward(self, ctx, chunk):
-        return self.net(torch.cat([ctx, chunk.flatten(1)], 1))[:, 0]
+        return self.net(torch.cat([ctx, chunk.flatten(1)], 1))
 
 
 def directions(x, dims):
@@ -94,8 +171,9 @@ def directions(x, dims):
     return x @ np.linalg.eigh(x.T @ x)[1][:, ::-1][:, :dims]
 
 
-def inputs(d, feats, views=VIEWS, dims=IMAGE_DIMS, grid=GRID):
-    """ctx (R, image features + state + plant one-hot), chunks (R, K, LOOKAHEAD, 7) minus the mean of the K:
+def inputs(d, feats, views=VIEWS, dims=IMAGE_DIMS, grid=GRID, frame=FRAME, experts=None, expert_dims=EXPERT_DIMS):
+    """ctx (R, image features + state + plant one-hot; frame "pot": the state's hand xy minus the target pot's, no plant),
+    chunks (R, K, LOOKAHEAD x 7 [+ expert_dims + 1]) minus the mean of the K:
     the K are near alike, raw their difference is lost (probe: pour start's gap closed 0.05 -> 0.34).
     Image features: grid: per camera, every token on its dims main directions (fit over all its tokens), flattened in
     grid order (tokens x dims); else the tokens' mean, cameras side by side, on its dims main directions. The directions
@@ -108,35 +186,61 @@ def inputs(d, feats, views=VIEWS, dims=IMAGE_DIMS, grid=GRID):
         img = [directions(feats[:, cams].astype(np.float32).mean(2).reshape(R, -1), dims)] if cams else []
     feats = np.concatenate(img or [np.zeros((R, 0), np.float32)], 1)
     plant = np.stack([d["plant"] == p for p in ev.PLANTS], 1).astype(np.float32)
-    chunks = d["chunks"][:, :, :LOOKAHEAD].astype(np.float32)
-    return np.concatenate([feats, d["state"], plant], 1).astype(np.float32), chunks - chunks.mean(1, keepdims=True)
+    state = d["state"].copy()
+    if frame == "pot":  # the sim's table frame is the world's in xy (pots at bddl.POTS); height kept as is
+        state[:, :2] -= np.array([POTS[p] for p in d["plant"]])
+        plant = plant[:, :0]
+    chunks = d["chunks"][:, :, :LOOKAHEAD].astype(np.float32).reshape(len(state), d["chunks"].shape[1], -1)
+    if expert_dims:  # per chunk: the policy's activations on its expert_dims main directions, + its flow-matching error
+        R, K, E = experts.shape
+        chunks = np.concatenate([chunks, directions(experts[..., :-1].reshape(-1, E - 1), expert_dims).reshape(R, K, -1),
+                                 experts[..., -1:]], 2)
+    return np.concatenate([feats, state, plant], 1).astype(np.float32), chunks - chunks.mean(1, keepdims=True)
+
+
+def targets(d, s, target=TARGET):
+    """What the judge learns per (replan, chunk) -> (R, K, D): its score minus the K's mean (D 1), or its OUTCOMES (D 9)."""
+    if target == "rank":
+        return (s - s.mean(1, keepdims=True))[..., None].astype(np.float32)
+    return np.concatenate([np.atleast_3d(d[k]).reshape(*d[k].shape[:2], -1) for k in OUTCOMES], 2).astype(np.float32)
+
+
+def rate(d, y, target=TARGET):
+    """The judge's predictions (R, K, D) -> a score per chunk (R, K): the relative score itself, or judge_check.score
+    of the predicted outcomes (by the replan's phase, as the recorded chunks were scored)."""
+    if target == "rank":
+        return y[..., 0]
+    cols = np.cumsum([0] + [3 if k == "mouth_cm" else 1 for k in OUTCOMES])
+    out = {k: y[..., a:b] if k == "mouth_cm" else y[..., a] for k, a, b in zip(OUTCOMES, cols, cols[1:])}
+    return score(dict(out, phase=d["phase"]))
 
 
 def predict(model, norm, ctx, chunks):
-    """The judge's relative score per (replan, chunk): (R, K)."""
+    """The judge's targets per (replan, chunk): (R, K, D)."""
     R, K = chunks.shape[:2]
     model.eval()
     with torch.inference_mode():
         y = model((torch.from_numpy(ctx) - norm["ctx"][0]).div(norm["ctx"][1]).repeat_interleave(K, 0),
                   (torch.from_numpy(chunks) - norm["chunk"][0]).div(norm["chunk"][1]).flatten(0, 1))
-    return (y * norm["y"]).view(R, K).numpy()
+    return (y * norm["y"][1] + norm["y"][0]).view(R, K, -1).numpy()
 
 
 def train(ctx, chunks, y, w, tr, te=None):
-    """Fit a judge on replans tr, each weighted by w (R,), and the loss on te per epoch. Returns model, normalization,
-    loss curves."""
+    """Fit a judge on replans tr (targets y (R, K, D)), each weighted by w (R,), and the loss on te per epoch. Returns
+    model, normalization, loss curves."""
     torch.manual_seed(SEED)
     stat = lambda x: (torch.from_numpy(x.mean(0)), torch.from_numpy(x.std(0) + 1e-6))
-    norm = dict(ctx=stat(ctx[tr]), chunk=stat(chunks[tr].reshape(-1, *chunks.shape[2:])), y=float(y[tr].std() + 1e-6))
+    D = y.shape[-1]
+    norm = dict(ctx=stat(ctx[tr]), chunk=stat(chunks[tr].reshape(-1, *chunks.shape[2:])), y=stat(y[tr].reshape(-1, D)))
     K = chunks.shape[1]
     tensors = lambda idx: ((torch.from_numpy(ctx[np.repeat(idx, K)]) - norm["ctx"][0]) / norm["ctx"][1],
                            (torch.from_numpy(chunks[idx].reshape(-1, *chunks.shape[2:])) - norm["chunk"][0]) / norm["chunk"][1],
-                           torch.from_numpy(y[idx].reshape(-1).astype(np.float32)) / norm["y"],
+                           (torch.from_numpy(y[idx].reshape(-1, D)) - norm["y"][0]) / norm["y"][1],
                            torch.from_numpy(np.repeat(w[idx], K).astype(np.float32)))
     dev = runs.device()
     on = lambda xs: tuple(x.to(dev) for x in xs)
     train_set, test_set = on(tensors(tr)), on(tensors(te)) if te is not None else None
-    model = Judge(ctx.shape[1] + LOOKAHEAD * chunks.shape[-1]).to(dev)
+    model = Judge(ctx.shape[1] + chunks[0, 0].size, D).to(dev)
     opt = torch.optim.AdamW(model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, EPOCHS)
     curves = dict(train=[], test=[])
@@ -145,7 +249,7 @@ def train(ctx, chunks, y, w, tr, te=None):
         order, losses = torch.randperm(len(train_set[0]), device=dev), []
         for b in range(0, len(order), BATCH):
             c, a, t, wt = (x[order[b:b + BATCH]] for x in train_set)
-            loss = (wt * (model(c, a) - t) ** 2).mean()
+            loss = (wt[:, None] * (model(c, a) - t) ** 2).mean()
             opt.zero_grad()
             loss.backward()
             opt.step()
@@ -196,27 +300,33 @@ def plot(curves, res, rel, pred, decisive, path):
     fig.savefig(path, dpi=110)
 
 
-def cross_validate(d, ctx, chunks, s, rel, w, decisive, share=1.0, seed=SEED):
-    """FOLDS-fold by trial: every replan predicted by a judge that never saw its trial -> predictions (R, K), loss curves.
+def cross_validate(d, ctx, chunks, y, w, s, decisive, target=TARGET, split=SPLIT, share=1.0, seed=SEED):
+    """Folds (split "trial": FOLDS of the trials; "spot": one per spot): every replan predicted by a judge that never saw
+    its trial (or its spot) -> its score per chunk (R, K), loss curves.
     share: of each fold's training trials used (a random subset, by seed); the held-out trials stay the same."""
     trials = np.random.default_rng(SEED).permutation(d["trial"].max() + 1)
-    pred, curves = np.zeros_like(rel), []
-    for k, fold in enumerate(np.array_split(trials, FOLDS)):
+    if split == "spot":
+        spot = np.array([int(f.stem.split("-")[1]) for f in d["files"]])  # per trial (some have no rows left)
+        folds = [np.flatnonzero(spot == v) for v in np.unique(spot)]
+    else:
+        folds = np.array_split(trials, FOLDS)
+    pred, curves = np.zeros_like(s), []
+    for k, fold in enumerate(folds):
         rest = np.setdiff1d(trials, fold)
         rest = np.random.default_rng(seed).choice(rest, round(share * len(rest)), replace=False)
         te, tr = np.flatnonzero(np.isin(d["trial"], fold)), np.flatnonzero(np.isin(d["trial"], rest))
-        model, norm, c = train(ctx, chunks, rel, w, tr, te)
-        pred[te] = predict(model, norm, ctx[te], chunks[te])
+        model, norm, c = train(ctx, chunks, y, w, tr, te)
+        pred[te] = rate({k: v[te] for k, v in d.items() if k != "files"}, predict(model, norm, ctx[te], chunks[te]), target)
         curves.append(c)
-        print(f"fold {k + 1}/{FOLDS}: train {c['train'][-1]:.3f} · held-out {c['test'][-1]:.3f} · "
+        print(f"fold {k + 1}/{len(folds)}: train {c['train'][-1]:.3f} · held-out {c['test'][-1]:.3f} · "
               f"gap closed (decisive) {evaluate(s[te], pred[te], decisive[te]).get('gap_closed')}", flush=True)
     return pred, curves
 
 
 def main():
     d = load(images=False)
-    settings = ABLATIONS if os.environ.get("ABLATE") else [CURVE] if os.environ.get("CURVE") else [(VIEWS, IMAGE_DIMS, GRID)]
-    uses_images = any(views for views, *_ in settings)  # else skip reading the cached tokens (GBs)
+    settings = [CURVE] if os.environ.get("CURVE") else [(VIEWS, IMAGE_DIMS, GRID)]  # ABLATE: no images
+    uses_images = not os.environ.get("ABLATE") and any(views for views, *_ in settings)  # else skip reading the cached tokens (GBs)
     feats = features(d) if uses_images else np.zeros((len(d["pick"]), len(CAMERAS), 1, 1), np.float16)
     s = score(d)
     rel = (s - s.mean(1, keepdims=True)).astype(np.float32)
@@ -226,10 +336,10 @@ def main():
 
     if os.environ.get("ABLATE"):
         table = {}
-        for views, dims, grid in ABLATIONS:
-            name = f"{'+'.join(CAMERAS[v] for v in views) or 'no images'} · {dims}{' per patch' if grid else ''}"
-            ctx, chunks = inputs(d, feats, views, dims, grid)
-            pred, _ = cross_validate(d, ctx, chunks, s, rel, w, decisive)
+        for frame, target in VARIANTS:
+            name = f"{frame} frame · {target} · unseen spot"
+            ctx, chunks = inputs(d, feats, (), 0, False, frame)
+            pred, _ = cross_validate(d, ctx, chunks, targets(d, s, target), w, s, decisive, target, "spot")
             table[name] = {k: evaluate(s, pred, m).get("gap_closed") for k, m in
                            dict(decisive=decisive, **{p: (d["phase"] == p) & decisive for p in PHASES}).items()}
         (OUT / "ablation.json").write_text(json.dumps(table, indent=2))
@@ -239,13 +349,28 @@ def main():
         print(f"-> {OUT / 'ablation.json'}")
         return
 
+    if os.environ.get("EXPERT"):
+        experts, table = expert(d), {}
+        for dims in EXPERT_VARIANTS:
+            name = f"policy activations · {dims} · unseen spot" if dims else "no policy activations · unseen spot"
+            ctx, chunks = inputs(d, feats, (), 0, False, "table", experts, dims)
+            pred, _ = cross_validate(d, ctx, chunks, targets(d, s, "rank"), w, s, decisive, "rank", "spot")
+            table[name] = {k: evaluate(s, pred, m).get("gap_closed") for k, m in
+                           dict(decisive=decisive, **{p: (d["phase"] == p) & decisive for p in PHASES}).items()}
+        (OUT / "expert.json").write_text(json.dumps(table, indent=2))
+        print("gap closed on decisive replans\n" + f"{'':44}" + "".join(f"{k:>12}" for k in ["all", *PHASES]))
+        for name, r in table.items():
+            print(f"{name:44}" + "".join(f"{r[k] if r[k] is not None else '-':>12}" for k in ["decisive", *PHASES]))
+        print(f"-> {OUT / 'expert.json'}")
+        return
+
     if os.environ.get("CURVE"):
         ctx, chunks = inputs(d, feats, *CURVE)
         table = {}
         for share in SHARES:
             runs = []
             for seed in range(CURVE_SEEDS):
-                pred, _ = cross_validate(d, ctx, chunks, s, rel, w, decisive, share, seed)
+                pred, _ = cross_validate(d, ctx, chunks, targets(d, s), w, s, decisive, share=share, seed=seed)
                 runs.append([evaluate(s, pred, m).get("gap_closed") or 0 for m in
                              [decisive, *((d["phase"] == p) & decisive for p in PHASES)]])
             table[share] = dict(zip(["decisive", *PHASES], np.round(np.mean(runs, 0), 3).tolist()))
@@ -258,15 +383,17 @@ def main():
         return
 
     ctx, chunks = inputs(d, feats)
-    pred, curves = cross_validate(d, ctx, chunks, s, rel, w, decisive)
+    y = targets(d, s)
+    pred, curves = cross_validate(d, ctx, chunks, y, w, s, decisive)
     res = dict(all=evaluate(s, pred, np.ones(len(s), bool)), decisive=evaluate(s, pred, decisive),
                **{p: evaluate(s, pred, d["phase"] == p) for p in PHASES},
                **{f"{p} · decisive": evaluate(s, pred, (d["phase"] == p) & decisive) for p in PHASES})
-    model, norm, _ = train(ctx, chunks, rel, w, np.arange(len(s)))  # the judge to use: every trial
-    torch.save(dict(state_dict=model.state_dict(), norm=norm, n_in=ctx.shape[1] + LOOKAHEAD * chunks.shape[-1],
-                    model=MODEL, lookahead=LOOKAHEAD, views=VIEWS, image_dims=IMAGE_DIMS, grid=GRID), OUT / "judge.pt")
+    model, norm, _ = train(ctx, chunks, y, w, np.arange(len(s)))  # the judge to use: every trial
+    torch.save(dict(state_dict=model.state_dict(), norm=norm, n_in=ctx.shape[1] + chunks[0, 0].size,
+                    n_out=y.shape[-1], model=MODEL, lookahead=LOOKAHEAD, views=VIEWS, image_dims=IMAGE_DIMS, grid=GRID,
+                    target=TARGET, frame=FRAME), OUT / "judge.pt")
     (OUT / "judge.json").write_text(json.dumps(res, indent=2))
-    plot(curves, res, rel, pred, decisive, OUT / "judge.png")
+    plot(curves, res, rel, pred - pred.mean(1, keepdims=True), decisive, OUT / "judge.png")
     print(json.dumps(res, indent=2))
     print(f"-> {OUT / 'judge.png'}, {OUT / 'judge.pt'}")
 

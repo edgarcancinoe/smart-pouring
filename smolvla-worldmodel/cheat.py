@@ -155,7 +155,8 @@ def judge_pick(frame, chunks, task):
         if not path.exists():
             path = hf_hub_download(HUB, f"worldmodel/judge/{MODEL}/judge.pt", repo_type="dataset")
         j = torch.load(path, weights_only=False)
-        assert j["image_dims"] == 0, "shortcut: the live judge reads no cameras; retrain with IMAGE_DIMS = 0"
+        assert j["image_dims"] == 0 and j.get("target", "rank") == "rank" and j.get("frame", "table") == "table", \
+            "shortcut: the live judge reads no cameras and predicts the rank in the table frame; retrain with those"
         model = Judge(j["n_in"])
         model.load_state_dict(j["state_dict"])
         _run["judge"] = model.eval(), j["norm"], j["lookahead"]
@@ -163,8 +164,9 @@ def judge_pick(frame, chunks, task):
     model, norm, n = _run["judge"]
     plant = task.split()[2]  # "Water the <plant> plant"
     ctx = np.r_[frame["observation.state"], [plant == p for p in ev.PLANTS]][None].astype(np.float32)
-    c = chunks[:, :n].astype(np.float32)
+    c = chunks[:, :n].astype(np.float32).reshape(len(chunks), -1)
     scores = predict(model, norm, ctx, (c - c.mean(0))[None])[0]
+    scores = scores[:, 0]
     return int(np.argmax(scores)), scores
 
 
