@@ -27,6 +27,7 @@ import torch
 from torch import nn
 
 import evaluate as ev
+import runs
 from dataset.export_lerobot import CAMERAS
 from judge_check import DECISIVE, MODEL, OUT, PHASES, load, score
 
@@ -45,10 +46,9 @@ IMAGE_DIMS = 64         # image features kept (PCA); both views at 64 memorized 
 VIEWS = ("observation.images.image",)  # cameras the judge sees: the main view (both: pour start 0.18, none: 0.34)
 GRID = False            # keep the token grid (each token cut to IMAGE_DIMS) instead of its mean
 MAIN, WRIST = CAMERAS
-ABLATIONS = [((), 0, False), ((MAIN, WRIST), 64, False), ((WRIST,), 4, True), ((MAIN,), 4, True),
-             ((MAIN, WRIST), 4, True)]  # (VIEWS, IMAGE_DIMS, GRID) ABLATE=1 compares
+ABLATIONS = [((), 0, False), ((MAIN, WRIST), 4, True)]  # (VIEWS, IMAGE_DIMS, GRID) ABLATE=1 compares: the two best
 CURVE = ((), 0, False)  # (VIEWS, IMAGE_DIMS, GRID) CURVE=1 trains on a share of the trials: no images, the simplest
-SHARES = (0.25, 0.5, 0.75, 1.0)  # of each fold's training trials
+SHARES = (0.5, 1.0)     # of each fold's training trials
 CURVE_SEEDS = 3         # random subsets per share, averaged: one is too noisy
 
 
@@ -133,28 +133,30 @@ def train(ctx, chunks, y, w, tr, te=None):
                            (torch.from_numpy(chunks[idx].reshape(-1, *chunks.shape[2:])) - norm["chunk"][0]) / norm["chunk"][1],
                            torch.from_numpy(y[idx].reshape(-1).astype(np.float32)) / norm["y"],
                            torch.from_numpy(np.repeat(w[idx], K).astype(np.float32)))
-    train_set, test_set = tensors(tr), tensors(te) if te is not None else None
-    model = Judge(ctx.shape[1] + LOOKAHEAD * chunks.shape[-1])
+    dev = runs.device()
+    on = lambda xs: tuple(x.to(dev) for x in xs)
+    train_set, test_set = on(tensors(tr)), on(tensors(te)) if te is not None else None
+    model = Judge(ctx.shape[1] + LOOKAHEAD * chunks.shape[-1]).to(dev)
     opt = torch.optim.AdamW(model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, EPOCHS)
     curves = dict(train=[], test=[])
     for epoch in range(EPOCHS):
         model.train()
-        order, losses = torch.randperm(len(train_set[0])), []
+        order, losses = torch.randperm(len(train_set[0]), device=dev), []
         for b in range(0, len(order), BATCH):
             c, a, t, wt = (x[order[b:b + BATCH]] for x in train_set)
             loss = (wt * (model(c, a) - t) ** 2).mean()
             opt.zero_grad()
             loss.backward()
             opt.step()
-            losses.append(loss.item())
+            losses.append(loss.detach())
         sched.step()
-        curves["train"].append(float(np.mean(losses)))
+        curves["train"].append(torch.stack(losses).mean().item())
         if test_set:
             model.eval()
             with torch.inference_mode():
                 curves["test"].append(nn.functional.mse_loss(model(*test_set[:2]), test_set[2]).item())
-    return model, norm, curves
+    return model.cpu(), norm, curves
 
 
 def evaluate(true, pred, m):
