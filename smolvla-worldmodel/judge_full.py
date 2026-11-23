@@ -5,6 +5,8 @@ its look-ahead; plus the phase the replan was in and the state then. The phase o
 ahead (the start of the pour: HORIZON more steps of the plain policy, its effect shows late; elsewhere 1 s) and how
 judge_check.py scores it; the judge never sees it.
 The pilot (trials 0-1) looked ahead in every phase, 3 s also in grasp and put back: those rows stay in the data.
+Spot 0 (units <plant>-0-<t>): a random mug start per trial anywhere in AREA, KEEP_OUT from the pour benchmark's spots
+5-8, so the judge can't learn 4 fixed scenes. Each replan also keeps the mug's start and the policy's grasp memory.
 -> results/judge-full/<model>/data/<unit>.npz
 
 Usage: ./run judge-full [--jobs 8]
@@ -16,11 +18,14 @@ import numpy as np
 
 import cheat
 import evaluate as ev
+import grasp_position as gp
 from dataset.export_lerobot import CAMERAS
 from judge_check import TIP_DEG  # carried mug tilted at least this: the tip (1 s look-ahead); less: the start of the pour
 
-SPOTS = (1, 2, 3, 4)        # trained spots: 5-8 stay unseen
-TRIALS = range(12, 17)      # per plant x spot (new names and seeds): 60 episodes; pilot 0-1, main run 2-6, then 7-11
+SPOTS = (0,)                # 0: a random start per trial (AREA); before: the trained spots 1-4 (5-8 stay unseen)
+TRIALS = range(0, 20)       # per plant x spot (new names and seeds): 60 episodes; spots 1-4: pilot 0-1, main run 2-6, then 7-16
+AREA = ((-24.0, 14.0), (27.0, 30.0))  # cm, real table frame (x, y) min and max: the strip spots 1-8 lie in
+KEEP_OUT = 4.0              # cm: no random start this close to spots 5-8, the pour benchmark's unseen spots
 LOOK_PHASES = ("pour start", "tip")  # pilot: grasp's choices were mostly distance noise; the put back is left to the policy
 MUG_JITTER = 0.03           # m, as DAgger's rollouts (eval: 0.01)
 SEED = 30_000               # added to evaluate.trial_seed: no eval, distill.py (10_000) or judge.py (20_000) trial's seed
@@ -49,12 +54,22 @@ def on_choice(frame, chunks, outcomes, pick):
         chunks=chunks[:, :cheat.LOOKAHEAD].astype(np.float32), pick=pick, step=cheat._run["env"].env.timestep,
         phase=phase(now), horizon=cheat.LOOKAHEAD + cheat.horizon(now), now_tilt=now["tilt"], now_in_mug=now["in_mug"],
         over=o("over"), elsewhere=o("elsewhere"), in_mug=o("in_mug"), mouth_cm=o("mouth_cm"), tilt=o("tilt"), hand_cm=o("hand_cm"),
-        home_cm=o("home_cm"), up_cm=o("up_cm")))
+        home_cm=o("home_cm"), up_cm=o("up_cm"), start=_rec["start"], grasp=gp.CURRENT.numpy().copy()))
+
+
+def random_start(rng):
+    """A mug start (cm, real table frame) in AREA, at least KEEP_OUT from spots 5-8."""
+    while True:
+        xy = tuple(rng.uniform(*AREA))
+        if min(np.hypot(*np.subtract(xy, ev.SPOTS[s])) for s in (5, 6, 7, 8)) > KEEP_OUT:
+            return xy
 
 
 def reset(env, spot, rng, jitter=MUG_JITTER):
-    obs = _reset(env, spot, rng, MUG_JITTER)
-    _rec["rows"] = []
+    if spot == 0:  # evaluate.reset reads the start from SPOTS
+        ev.SPOTS[0] = random_start(rng)
+    obs = _reset(env, spot, rng, 0.0 if spot == 0 else MUG_JITTER)
+    _rec.update(rows=[], start=ev.SPOTS[spot])
     return obs
 
 

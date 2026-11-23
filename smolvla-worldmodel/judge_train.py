@@ -127,12 +127,15 @@ def expert(d):
             policy, pre, _ = model = model or ev.load_model(MODEL)
             m, cfg = policy.model, policy.config
             plant, spot, t = f.stem.split("-")
+            z, rows = np.load(f), []
             offset, jitter = JITTER[recording]
             seed = offset + ev.trial_seed(plant, int(spot), int(t))
-            start = np.add(real_to_sim(ev.SPOTS[int(spot)]), np.random.default_rng(seed).uniform(-jitter, jitter, 2))
-            gp.CURRENT = torch.tensor([1, *gp.normalize(start, egp._last["stats"])], dtype=torch.float32)
-            z, rows = np.load(f), []
+            if "grasp" not in z.files:  # shortcut: older recordings lack the grasp memory: the mug's start stands in for where it was grasped
+                start = np.add(real_to_sim(ev.SPOTS[int(spot)]), np.random.default_rng(seed).uniform(-jitter, jitter, 2))
+                gp.CURRENT = torch.tensor([1, *gp.normalize(start, egp._last["stats"])], dtype=torch.float32)
             for r in range(len(z["pick"])):
+                if "grasp" in z.files:  # recorded at the replan (judge_full.py)
+                    gp.CURRENT = torch.from_numpy(z["grasp"][r]).float()
                 K, n = z["chunks"].shape[1], z["chunks"].shape[2]
                 batch = {cam: torch.from_numpy(z[cam][r]).permute(2, 0, 1).float().div(255)[None].repeat(K, 1, 1, 1) for cam in CAMERAS}
                 batch["observation.state"] = torch.from_numpy(z["state"][r])[None].repeat(K, 1)
