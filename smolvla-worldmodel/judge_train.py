@@ -21,6 +21,7 @@ random one, overall and per phase? Then a final judge on all trials
 -> results/judge/<model>/judge.pt (weights + normalization), judge.json, judge.png.
 
 Usage: ./run judge-train
+       VGAS=1 ./run judge-train     VGAS's critic (Q-Chunk-Former on the image tokens) vs the MLP, unseen spot -> vgas.json
        ABLATE=1 ./run judge-train   every VARIANTS setting, trained on 3 spots and judged on the 4th -> ablation.json (no judge saved)
        EXPERT=1 ./run judge-train   the same test for every EXPERT_VARIANTS setting (the policy's own activations) -> expert.json
        CURVE=1 ./run judge-train    gap closed vs share of training trials: would more data help? -> curve.json
@@ -65,6 +66,13 @@ EXPERT_DIMS = 0         # the policy's own activations per chunk kept (PCA); 0: 
 EXPERT_VARIANTS = (0, 8, 32, 128)  # EXPERT_DIMS EXPERT=1 compares, SPLIT "spot"
 EXPERT_T = 0.1          # flow-matching time the chunk is read at: mostly the chunk, a little noise (as in training)
 JITTER = {"judge-data": (20_000, 0.03), "judge-full": (30_000, 0.03)}  # recording -> its trial seeds' offset, mug jitter (m)
+QCF_VIEWS = (MAIN, WRIST)  # VGAS=1: cameras whose image tokens the Q-Chunk-Former reads
+QCF_WIDTH = 256         # its token width
+QCF_LAYERS = 2          # its Transformer layers (VGAS: SmolVLM2's first 2)
+QCF_HEADS = 4
+QCF_EPOCHS = 20
+QCF_BATCH = 32          # replans per step (x K chunks)
+QCF_LR = 3e-4
 CURVE = ((), 0, False)  # (VIEWS, IMAGE_DIMS, GRID) CURVE=1 trains on a share of the trials: no images, the simplest
 SHARES = (0.5, 1.0)     # of each fold's training trials
 CURVE_SEEDS = 3         # random subsets per share, averaged: one is too noisy
@@ -163,6 +171,93 @@ class Judge(nn.Module):
 
     def forward(self, ctx, chunk):
         return self.net(torch.cat([ctx, chunk.flatten(1)], 1))
+
+
+class QChunkFormer(nn.Module):
+    """VGAS's critic (arXiv 2602.07399) on our labels: the frozen policy's image tokens (both cameras, the grid kept: where
+    things are) + a plant token as context; per chunk one token fusing the chunk with the state (VGAS's state-action
+    fusion) and one [VALUE] token; a small Transformer; each [VALUE] token's output -> the chunk's relative score.
+    Each chunk's tokens see the context and themselves only, so the K chunks of a replan share one pass.
+    shortcut: layers start fresh, not from SmolVLM2's first 2 (VGAS), and the plant stands in for the language tokens;
+    upgrade if this beats the MLP on the unseen-spot test"""
+
+    def __init__(self, n_tokens, width, n_fuse, K):
+        super().__init__()
+        D = QCF_WIDTH
+        self.img, self.pos = nn.Linear(width, D), nn.Parameter(torch.zeros(n_tokens, D))
+        self.plant = nn.Embedding(len(ev.PLANTS), D)
+        self.fuse = nn.Sequential(nn.Linear(n_fuse, D), nn.GELU(), nn.Linear(D, D))
+        self.value = nn.Parameter(torch.zeros(1, 1, D))
+        self.enc = nn.TransformerEncoder(nn.TransformerEncoderLayer(D, QCF_HEADS, 2 * D, DROPOUT, batch_first=True, norm_first=True),
+                                         QCF_LAYERS)
+        self.head = nn.Sequential(nn.LayerNorm(D), nn.Linear(D, D), nn.GELU(), nn.Linear(D, 1))
+        C = n_tokens + 1  # context: image tokens + plant
+        L = C + 2 * K
+        mask = torch.ones(L, L, dtype=torch.bool)  # True: may not attend
+        mask[:, :C] = False
+        for k in range(K):
+            mask[C + k, C + k] = mask[C + K + k, C + k] = mask[C + K + k, C + K + k] = False
+        mask[:C, C:] = True
+        self.register_buffer("mask", mask)
+
+    def forward(self, tokens, plant, fused):
+        """tokens (B, n_tokens, width), plant (B,), fused (B, K, n_fuse) -> (B, K)."""
+        K = fused.shape[1]
+        x = torch.cat([self.img(tokens) + self.pos, self.plant(plant)[:, None], self.fuse(fused), self.value.expand(len(fused), K, -1)], 1)
+        return self.head(self.enc(x, mask=self.mask)[:, -K:])[..., 0]
+
+
+def qcf_fns(d, feats, chunks, y, w, views=QCF_VIEWS):
+    """fit(tr, te) and guess(model, norm, idx) for cross_validate with the Q-Chunk-Former. chunks: inputs()'s (minus the
+    K's mean); y: targets() "rank"; the loss is the weighted MSE of the relative score, which equals VGAS's anchor + pairwise
+    rank terms with the sim's real score gaps in place of their distance-to-demo ones."""
+    cams = [i for i, cam in enumerate(CAMERAS) if cam in views]
+    dev = runs.device()
+    tokens = torch.from_numpy(feats[:, cams].reshape(len(feats), -1, feats.shape[-1])).to(dev)  # float16: GBs
+    plant = torch.from_numpy(np.array([ev.PLANTS.index(p) for p in d["plant"]])).to(dev)
+    K = chunks.shape[1]
+    fused_np = np.concatenate([chunks, np.repeat(d["state"][:, None], K, 1)], 2).astype(np.float32)
+
+    def fit(tr, te):
+        torch.manual_seed(SEED)
+        mu, sd = fused_np[tr].reshape(-1, fused_np.shape[-1]).mean(0), fused_np[tr].reshape(-1, fused_np.shape[-1]).std(0) + 1e-6
+        ys = float(y[tr].std() + 1e-6)
+        norm = dict(fused=(mu, sd), y=ys)
+        fused = torch.from_numpy((fused_np - mu) / sd).to(dev)
+        target = torch.from_numpy(y[..., 0] / ys).to(dev)
+        wt = torch.from_numpy(w.astype(np.float32)).to(dev)
+        model = QChunkFormer(tokens.shape[1], tokens.shape[2], fused_np.shape[-1], K).to(dev)
+        opt = torch.optim.AdamW(model.parameters(), lr=QCF_LR, weight_decay=WEIGHT_DECAY)
+        sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, QCF_EPOCHS)
+        run = lambda idx: model(tokens[idx].float(), plant[idx], fused[idx])
+        curves = dict(train=[], test=[])
+        for epoch in range(QCF_EPOCHS):
+            model.train()
+            order, losses = torch.from_numpy(np.random.default_rng(SEED + epoch).permutation(tr)).to(dev), []
+            for b in range(0, len(order), QCF_BATCH):
+                idx = order[b:b + QCF_BATCH]
+                loss = (wt[idx, None] * (run(idx) - target[idx]) ** 2).mean()
+                opt.zero_grad()
+                loss.backward()
+                opt.step()
+                losses.append(loss.detach())
+            sched.step()
+            curves["train"].append(torch.stack(losses).mean().item())
+            model.eval()
+            with torch.inference_mode():
+                te_t = torch.from_numpy(te).to(dev)
+                curves["test"].append(float(np.mean([((run(te_t[b:b + 256]) - target[te_t[b:b + 256]]) ** 2).mean().item()
+                                                     for b in range(0, len(te_t), 256)])))
+        return model, dict(norm, fused_t=fused), curves
+
+    def guess(model, norm, idx):
+        model.eval()
+        idx = torch.from_numpy(idx).to(dev)
+        with torch.inference_mode():
+            out = torch.cat([model(tokens[i].float(), plant[i], norm["fused_t"][i]) for i in idx.split(256)])
+        return (out * norm["y"]).cpu().numpy()[..., None]
+
+    return fit, guess
 
 
 def directions(x, dims):
@@ -300,10 +395,12 @@ def plot(curves, res, rel, pred, decisive, path):
     fig.savefig(path, dpi=110)
 
 
-def cross_validate(d, ctx, chunks, y, w, s, decisive, target=TARGET, split=SPLIT, share=1.0, seed=SEED):
+def cross_validate(d, ctx, chunks, y, w, s, decisive, target=TARGET, split=SPLIT, share=1.0, seed=SEED, fns=None):
     """Folds (split "trial": FOLDS of the trials; "spot": one per spot): every replan predicted by a judge that never saw
     its trial (or its spot) -> its score per chunk (R, K), loss curves.
-    share: of each fold's training trials used (a random subset, by seed); the held-out trials stay the same."""
+    share: of each fold's training trials used (a random subset, by seed); the held-out trials stay the same.
+    fns: (fit(tr, te), guess(model, norm, idx)) for another critic than the MLP (qcf_fns)."""
+    fit, guess = fns or (lambda tr, te: train(ctx, chunks, y, w, tr, te), lambda m, n, idx: predict(m, n, ctx[idx], chunks[idx]))
     trials = np.random.default_rng(SEED).permutation(d["trial"].max() + 1)
     if split == "spot":
         spot = np.array([int(f.stem.split("-")[1]) for f in d["files"]])  # per trial (some have no rows left)
@@ -315,8 +412,8 @@ def cross_validate(d, ctx, chunks, y, w, s, decisive, target=TARGET, split=SPLIT
         rest = np.setdiff1d(trials, fold)
         rest = np.random.default_rng(seed).choice(rest, round(share * len(rest)), replace=False)
         te, tr = np.flatnonzero(np.isin(d["trial"], fold)), np.flatnonzero(np.isin(d["trial"], rest))
-        model, norm, c = train(ctx, chunks, y, w, tr, te)
-        pred[te] = rate({k: v[te] for k, v in d.items() if k != "files"}, predict(model, norm, ctx[te], chunks[te]), target)
+        model, norm, c = fit(tr, te)
+        pred[te] = rate({k: v[te] for k, v in d.items() if k != "files"}, guess(model, norm, te), target)
         curves.append(c)
         print(f"fold {k + 1}/{len(folds)}: train {c['train'][-1]:.3f} · held-out {c['test'][-1]:.3f} · "
               f"gap closed (decisive) {evaluate(s[te], pred[te], decisive[te]).get('gap_closed')}", flush=True)
@@ -326,7 +423,7 @@ def cross_validate(d, ctx, chunks, y, w, s, decisive, target=TARGET, split=SPLIT
 def main():
     d = load(images=False)
     settings = [CURVE] if os.environ.get("CURVE") else [(VIEWS, IMAGE_DIMS, GRID)]  # ABLATE: no images
-    uses_images = not os.environ.get("ABLATE") and any(views for views, *_ in settings)  # else skip reading the cached tokens (GBs)
+    uses_images = os.environ.get("VGAS") or not os.environ.get("ABLATE") and any(views for views, *_ in settings)  # else skip reading the cached tokens (GBs)
     feats = features(d) if uses_images else np.zeros((len(d["pick"]), len(CAMERAS), 1, 1), np.float16)
     s = score(d)
     rel = (s - s.mean(1, keepdims=True)).astype(np.float32)
@@ -347,6 +444,21 @@ def main():
         for name, r in table.items():
             print(f"{name:44}" + "".join(f"{r[k] if r[k] is not None else '-':>12}" for k in ["decisive", *PHASES]))
         print(f"-> {OUT / 'ablation.json'}")
+        return
+
+    if os.environ.get("VGAS"):  # the Q-Chunk-Former vs the MLP, both judged on a spot they never saw
+        ctx, chunks = inputs(d, feats, (), 0, False, "table")
+        y, table = targets(d, s, "rank"), {}
+        for name, fns in [("MLP, no images · unseen spot", None),
+                          (f"Q-Chunk-Former, {len(QCF_VIEWS)} camera(s) · unseen spot", qcf_fns(d, feats, chunks, y, w))]:
+            pred, _ = cross_validate(d, ctx, chunks, y, w, s, decisive, "rank", "spot", fns=fns)
+            table[name] = {k: evaluate(s, pred, m).get("gap_closed") for k, m in
+                           dict(decisive=decisive, **{p: (d["phase"] == p) & decisive for p in PHASES}).items()}
+        (OUT / "vgas.json").write_text(json.dumps(table, indent=2))
+        print("gap closed on decisive replans\n" + f"{'':52}" + "".join(f"{k:>12}" for k in ["all", *PHASES]))
+        for name, r in table.items():
+            print(f"{name:52}" + "".join(f"{r[k] if r[k] is not None else '-':>12}" for k in ["decisive", *PHASES]))
+        print(f"-> {OUT / 'vgas.json'}")
         return
 
     if os.environ.get("EXPERT"):
@@ -375,6 +487,7 @@ def main():
                              [decisive, *((d["phase"] == p) & decisive for p in PHASES)]])
             table[share] = dict(zip(["decisive", *PHASES], np.round(np.mean(runs, 0), 3).tolist()))
         (OUT / "curve.json").write_text(json.dumps(table, indent=2))
+        print(f"{len(d['files'])} trials ({sum('judge-full' in str(f) for f in d['files'])} whole episodes), {len(s)} replans")
         print(f"gap closed on decisive replans, mean of {CURVE_SEEDS} subsets\n{'share of trials':18}"
               + "".join(f"{k:>12}" for k in ["all", *PHASES]))
         for share, r in table.items():
