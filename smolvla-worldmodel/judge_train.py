@@ -231,7 +231,9 @@ def qcf_fns(d, feats, chunks, y, w, views=QCF_VIEWS):
         opt = torch.optim.AdamW(model.parameters(), lr=QCF_LR, weight_decay=WEIGHT_DECAY)
         sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, QCF_EPOCHS)
         run = lambda idx: model(tokens[idx].float(), plant[idx], fused[idx])
-        curves = dict(train=[], test=[])
+        curves = dict(train=[], test=[])  # as train()'s: weighted, 1 = no better than "all K equal"
+        tr_t = torch.from_numpy(tr).to(dev)
+        base_tr = (wt[tr_t, None] * target[tr_t] ** 2).mean().item()
         for epoch in range(QCF_EPOCHS):
             model.train()
             order, losses = torch.from_numpy(np.random.default_rng(SEED + epoch).permutation(tr)).to(dev), []
@@ -243,12 +245,12 @@ def qcf_fns(d, feats, chunks, y, w, views=QCF_VIEWS):
                 opt.step()
                 losses.append(loss.detach())
             sched.step()
-            curves["train"].append(torch.stack(losses).mean().item())
+            curves["train"].append(torch.stack(losses).mean().item() / base_tr)
             model.eval()
             with torch.inference_mode():
                 te_t = torch.from_numpy(te).to(dev)
-                curves["test"].append(float(np.mean([((run(te_t[b:b + 256]) - target[te_t[b:b + 256]]) ** 2).mean().item()
-                                                     for b in range(0, len(te_t), 256)])))
+                err = torch.cat([wt[i, None] * (run(i) - target[i]) ** 2 for i in te_t.split(256)])
+                curves["test"].append(err.mean().item() / (wt[te_t, None] * target[te_t] ** 2).mean().item())
         return model, dict(norm, fused_t=fused), curves
 
     def guess(model, norm, idx):
@@ -339,7 +341,8 @@ def train(ctx, chunks, y, w, tr, te=None):
     model = Judge(ctx.shape[1] + chunks[0, 0].size, D).to(dev)
     opt = torch.optim.AdamW(model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, EPOCHS)
-    curves = dict(train=[], test=[])
+    curves = dict(train=[], test=[])  # weighted loss / that of predicting the mean (1: no better than "all K equal")
+    base = lambda xs: (xs[3][:, None] * xs[2] ** 2).mean().item()
     for epoch in range(EPOCHS):
         model.train()
         order, losses = torch.randperm(len(train_set[0]), device=dev), []
@@ -351,11 +354,11 @@ def train(ctx, chunks, y, w, tr, te=None):
             opt.step()
             losses.append(loss.detach())
         sched.step()
-        curves["train"].append(torch.stack(losses).mean().item())
+        curves["train"].append(torch.stack(losses).mean().item() / base(train_set))
         if test_set:
             model.eval()
             with torch.inference_mode():
-                curves["test"].append(nn.functional.mse_loss(model(*test_set[:2]), test_set[2]).item())
+                curves["test"].append((test_set[3][:, None] * (model(*test_set[:2]) - test_set[2]) ** 2).mean().item() / base(test_set))
     return model.cpu(), norm, curves
 
 
@@ -377,7 +380,7 @@ def plot(curves, res, rel, pred, decisive, path):
     for k, c in enumerate(curves):
         ax.plot(c["train"], color="#1f6f99", alpha=0.6, label="train trials" if k == 0 else None)
         ax.plot(c["test"], color="#a8442f", alpha=0.6, label="held-out trials" if k == 0 else None)
-    ax.set(title=f"Relative-score loss per fold (normalized MSE, {len(curves)} folds)", xlabel="epoch")
+    ax.set(title=f"Loss per fold (weighted, 1 = no better than 'all equal'; {len(curves)} folds)", xlabel="epoch")
     ax.legend()
     ax = axes[1]
     subsets = ["all", "decisive"] + [f"{p} · decisive" for p in PHASES]
@@ -459,10 +462,11 @@ def main():
         fig, axes = plt.subplots(1, len(curves), figsize=(7 * len(curves), 4.2), layout="constrained", squeeze=False)
         for ax, (name, cs) in zip(axes[0], curves.items()):  # one line per held-out spot
             for k, c in enumerate(cs):
-                ax.plot(c["train"], color="#1f6f99", alpha=0.7, label="train (decisive weighted)" if k == 0 else None)
+                ax.plot(c["train"], color="#1f6f99", alpha=0.7, label="train spots" if k == 0 else None)
                 ax.plot(c["test"], color="#a8442f", alpha=0.7, label="held-out spot" if k == 0 else None)
             ax.axhline(1, color="#5b6d75", ls=":", lw=1)
-            ax.set(title=f"{name}: {table[name]['decisive']} of the gap", xlabel="epoch", ylabel="loss (normalized MSE)")
+            ax.set(title=f"{name}: {table[name]['decisive']} of the gap", xlabel="epoch",
+                   ylabel="weighted loss (1 = no better than 'all 8 equal')")
             ax.legend()
         fig.savefig(OUT / "vgas.png", dpi=110)
         print("gap closed on decisive replans\n" + f"{'':52}" + "".join(f"{k:>12}" for k in ["all", *PHASES]))
