@@ -70,9 +70,10 @@ QCF_VIEWS = (MAIN, WRIST)  # VGAS=1: cameras whose image tokens the Q-Chunk-Form
 QCF_WIDTH = 256         # its token width
 QCF_LAYERS = 2          # its Transformer layers (VGAS: SmolVLM2's first 2)
 QCF_HEADS = 4
-QCF_EPOCHS = 20
+QCF_EPOCHS = 60          # 20 at 3e-4 underfit (train loss ~1.9, about 'all equal')
+QCF_DROPOUT = 0.1
 QCF_BATCH = 32          # replans per step (x K chunks)
-QCF_LR = 3e-4
+QCF_LR = 1e-3
 CURVE = ((), 0, False)  # (VIEWS, IMAGE_DIMS, GRID) CURVE=1 trains on a share of the trials: no images, the simplest
 SHARES = (0.5, 1.0)     # of each fold's training trials
 CURVE_SEEDS = 3         # random subsets per share, averaged: one is too noisy
@@ -188,7 +189,7 @@ class QChunkFormer(nn.Module):
         self.plant = nn.Embedding(len(ev.PLANTS), D)
         self.fuse = nn.Sequential(nn.Linear(n_fuse, D), nn.GELU(), nn.Linear(D, D))
         self.value = nn.Parameter(torch.zeros(1, 1, D))
-        self.enc = nn.TransformerEncoder(nn.TransformerEncoderLayer(D, QCF_HEADS, 2 * D, DROPOUT, batch_first=True, norm_first=True),
+        self.enc = nn.TransformerEncoder(nn.TransformerEncoderLayer(D, QCF_HEADS, 2 * D, QCF_DROPOUT, batch_first=True, norm_first=True),
                                          QCF_LAYERS)
         self.head = nn.Sequential(nn.LayerNorm(D), nn.Linear(D, D), nn.GELU(), nn.Linear(D, 1))
         C = n_tokens + 1  # context: image tokens + plant
@@ -448,17 +449,26 @@ def main():
 
     if os.environ.get("VGAS"):  # the Q-Chunk-Former vs the MLP, both judged on a spot they never saw
         ctx, chunks = inputs(d, feats, (), 0, False, "table")
-        y, table = targets(d, s, "rank"), {}
+        y, table, curves = targets(d, s, "rank"), {}, {}
         for name, fns in [("MLP, no images · unseen spot", None),
                           (f"Q-Chunk-Former, {len(QCF_VIEWS)} camera(s) · unseen spot", qcf_fns(d, feats, chunks, y, w))]:
-            pred, _ = cross_validate(d, ctx, chunks, y, w, s, decisive, "rank", "spot", fns=fns)
+            pred, curves[name] = cross_validate(d, ctx, chunks, y, w, s, decisive, "rank", "spot", fns=fns)
             table[name] = {k: evaluate(s, pred, m).get("gap_closed") for k, m in
                            dict(decisive=decisive, **{p: (d["phase"] == p) & decisive for p in PHASES}).items()}
         (OUT / "vgas.json").write_text(json.dumps(table, indent=2))
+        fig, axes = plt.subplots(1, len(curves), figsize=(7 * len(curves), 4.2), layout="constrained", squeeze=False)
+        for ax, (name, cs) in zip(axes[0], curves.items()):  # one line per held-out spot
+            for k, c in enumerate(cs):
+                ax.plot(c["train"], color="#1f6f99", alpha=0.7, label="train (decisive weighted)" if k == 0 else None)
+                ax.plot(c["test"], color="#a8442f", alpha=0.7, label="held-out spot" if k == 0 else None)
+            ax.axhline(1, color="#5b6d75", ls=":", lw=1)
+            ax.set(title=f"{name}: {table[name]['decisive']} of the gap", xlabel="epoch", ylabel="loss (normalized MSE)")
+            ax.legend()
+        fig.savefig(OUT / "vgas.png", dpi=110)
         print("gap closed on decisive replans\n" + f"{'':52}" + "".join(f"{k:>12}" for k in ["all", *PHASES]))
         for name, r in table.items():
             print(f"{name:52}" + "".join(f"{r[k] if r[k] is not None else '-':>12}" for k in ["decisive", *PHASES]))
-        print(f"-> {OUT / 'vgas.json'}")
+        print(f"-> {OUT / 'vgas.json'}, {OUT / 'vgas.png'}")
         return
 
     if os.environ.get("EXPERT"):
