@@ -27,6 +27,7 @@ from sim.watering.assets import MUG, POTS_DIMS
 
 ARM = os.environ.get("ARM", "cheat")  # "cheat", "distance" (the cheat scored by distance only), "random" (a random one of the K), "judge" or "plain" (env var so the workers see it)
 MODEL = os.environ.get("MODEL", "libero-4s-dart-full-xxl-sd-rel-b64-dagger1")
+PROMPT = os.environ.get("PROMPT", "")  # appended to the task once the mug is carried (recap.py's " Advantage: positive")
 SPOTS = (5, 6, 7, 8)    # unseen spots only
 TRIALS = 3              # per plant x spot, the first 3 seeds of the main eval
 K = 8                   # chunks sampled per replan
@@ -182,6 +183,8 @@ def _choose(model, frame, task):
     _run["lifted"] |= carried(e)
     entry = dict(step=int(e.timestep), **s, **grip(e))
     _run["log"].append(entry)
+    if PROMPT and _run["lifted"]:
+        task += PROMPT
     if ARM == "plain" or not look(s):
         return _act(model, frame, task)
 

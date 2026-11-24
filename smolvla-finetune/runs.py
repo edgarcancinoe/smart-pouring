@@ -113,6 +113,11 @@ MODELS = {
                                                              data="edgarcancinoe/water_pour_dagger1_cheat", dropout=0.3, batch=64, steps=8_000,
                                                              script="smolvla-memory/relative-actions/relative.py"),
     # the same, the cheat's pours repeated 5x (B2: 100 of 944 episodes made no difference)
+    # dagger1 fine-tuned on the judge recordings' options tagged by advantage (smolvla-worldmodel/recap.py: RECAP)
+    "libero-4s-dart-full-xxl-sd-rel-b64-dagger1-recap": dict(start="libero-4s-dart-full-xxl-sd-rel-b64-dagger1", k=4,
+                                                             repo="edgarcancinoe/smolvla_water_libero-4s-dart-full-xxl-sd-rel-b64-dagger1-recap",
+                                                             data="edgarcancinoe/water_pour_dagger1",
+                                                             script="smolvla-memory/relative-actions/relative.py"),
     "libero-4s-dart-full-xxl-sd-rel-b64-dagger1-cheat5": dict(start="libero-4s-dart-full-xxl-sd-rel-b64-dagger1", k=4,
                                                               repo="edgarcancinoe/smolvla_water_libero-4s-dart-full-xxl-sd-rel-b64-dagger1-cheat5",
                                                               data="edgarcancinoe/water_pour_dagger1_cheat5", dropout=0.3, batch=64, steps=8_000,

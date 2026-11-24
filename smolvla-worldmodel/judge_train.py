@@ -103,6 +103,22 @@ def features(d):
     return np.concatenate(out)
 
 
+def grasp_memory(f, z):
+    """The policy's grasp memory (grasp_position.CURRENT) at each replan of recording f (z: np.load(f)) -> (n, 3):
+    recorded since the random-start run (judge_full.py), else rebuilt from the trial's seed.
+    shortcut: rebuilt = the mug's start xy, the hand grips a few cm off its centre; needs egp.load_model's stats loaded"""
+    import eval_grasp_position as egp
+    import grasp_position as gp
+    from sim.watering.bddl import real_to_sim
+    if "grasp" in z.files:
+        return z["grasp"].astype(np.float32)
+    plant, spot, t = f.stem.split("-")
+    offset, jitter = JITTER[f.parent.parent.parent.name]
+    seed = offset + ev.trial_seed(plant, int(spot), int(t))
+    start = np.add(real_to_sim(ev.SPOTS[int(spot)]), np.random.default_rng(seed).uniform(-jitter, jitter, 2))
+    return np.tile(np.r_[1, gp.normalize(start, egp._last["stats"])], (len(z["pick"]), 1)).astype(np.float32)
+
+
 def expert(d):
     """Every recorded chunk through a frozen copy of the policy: its action expert reads the chunk (EXPERT_T: x_t =
     t noise + (1 - t) chunk, the noise shared by the K) against the scene (cameras, task, state, grasp memory)
@@ -128,14 +144,10 @@ def expert(d):
             m, cfg = policy.model, policy.config
             plant, spot, t = f.stem.split("-")
             z, rows = np.load(f), []
-            offset, jitter = JITTER[recording]
-            seed = offset + ev.trial_seed(plant, int(spot), int(t))
-            if "grasp" not in z.files:  # shortcut: older recordings lack the grasp memory: the mug's start stands in for where it was grasped
-                start = np.add(real_to_sim(ev.SPOTS[int(spot)]), np.random.default_rng(seed).uniform(-jitter, jitter, 2))
-                gp.CURRENT = torch.tensor([1, *gp.normalize(start, egp._last["stats"])], dtype=torch.float32)
+            seed = (JITTER[recording][0] + ev.trial_seed(plant, int(spot), int(t)))
+            grasps = grasp_memory(f, z)
             for r in range(len(z["pick"])):
-                if "grasp" in z.files:  # recorded at the replan (judge_full.py)
-                    gp.CURRENT = torch.from_numpy(z["grasp"][r]).float()
+                gp.CURRENT = torch.from_numpy(grasps[r])
                 K, n = z["chunks"].shape[1], z["chunks"].shape[2]
                 batch = {cam: torch.from_numpy(z[cam][r]).permute(2, 0, 1).float().div(255)[None].repeat(K, 1, 1, 1) for cam in CAMERAS}
                 batch["observation.state"] = torch.from_numpy(z["state"][r])[None].repeat(K, 1)
