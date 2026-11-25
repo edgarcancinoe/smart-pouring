@@ -1,0 +1,308 @@
+"""DSRL (Wagenmaker et al. 2025, "Steering Your Diffusion Policy with Latent Space RL"): online RL that leaves
+SmolVLA frozen and learns only the noise its chunk is denoised from. A small SAC actor maps what the policy knows (robot
+state, grasp memory, plant) to that noise; SmolVLA turns it into the chunk as usual. Only the pour is learned: the
+plain policy carries the mug (pour.py's trials), the actor picks the noise at every replan from then until the mug is
+empty. Reward per replan: drops newly in the target pot minus drops newly in a wrong pot or spilled.
+The critic also sees the sim (mug mouth vs pot, tilt, drops: cheat.state), the actor never does (asymmetric).
+
+Training runs in rounds: EPISODES pour trials with the current actor (random mug starts, as judge_full.py: away from the
+benchmark's spots 5-8), then SAC updates on every transition so far, then the next round. Resumable: a rerun skips the
+finished trials and continues from learner.pt.
+-> results/dsrl/<model>/: <unit>.json + data/<unit>.npz per trial, actor.pt, learner.pt, dsrl.json (per round)
+shortcut: the actor sees no camera (the pots don't move, the plant says which); add SigLIP features if it plateaus
+shortcut: the actor sets the noise of the chunk's first NOISE_STEPS actions (the ones run), the rest of the noise is 0
+shortcut: a trial that hangs stalls its round (as in pour-plain): stop and rerun, it resumes
+
+Usage: ./run dsrl [--jobs 9]        train -> results/dsrl/<model>/
+       ./run pour-dsrl [--jobs 9]   the pour benchmark at spots 5-8 with the trained actor (its mean noise) -> results/pour-dsrl/
+"""
+import json
+import os
+import time
+
+os.environ.setdefault("ARM", "dsrl")  # before cheat reads it (also in the spawned workers)
+
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+import pour  # noqa: F401 (patches evaluate and cheat: pour-only trials); this file patches on top
+import cheat
+import evaluate as ev
+import grasp_position as gp
+import runs
+from dataset.export_lerobot import CAMERAS
+from judge_check import HUB
+
+TRAIN = os.environ.get("DSRL") != "eval"  # ./run pour-dsrl sets DSRL=eval: the actor's mean noise, benchmark trials
+ROUNDS = 30
+EPISODES = 18           # pour trials per round (a third per plant)
+NOISE_STEPS = 10        # chunk steps whose noise the actor sets (= the N_ACTION_STEPS run)
+NOISE_MAX = 2.0         # the actor's noise is squashed to +- this (SmolVLA's noise is N(0, 1))
+HIDDEN = 256
+GAMMA = 0.95            # per replan (0.5 s): about 10 s ahead
+UTD = 10                # gradient steps per new transition
+BATCH = 256
+LR = 3e-4
+TAU = 0.005             # target critic update rate
+SEED = 40_000           # training trial seeds: no eval, judge or distill seed
+AREA = ((-24.0, 14.0), (27.0, 30.0))  # cm: random mug starts, as judge_full.py (importing it would patch evaluate)
+KEEP_OUT = 4.0          # cm from spots 5-8
+OUT = cheat.RESULTS.parent / "dsrl" / cheat.MODEL
+ACTOR = OUT / "actor.pt"
+N_A = len(ev.OPEN)      # action dims (7)
+N_W = NOISE_STEPS * N_A
+N_OBS = 8 + 3 + len(ev.PLANTS)  # state, grasp memory, plant
+N_PRIV = 9              # priv()
+
+_w = {}  # this process: the actor (and its file's mtime), the running trial's unit and replans
+
+
+def obs(frame, task):
+    """What the actor sees: SmolVLA's state (8), its grasp memory (3), the plant (one-hot)."""
+    plant = task.split()[2]  # "Water the <plant> plant"
+    return np.r_[frame["observation.state"], gp.CURRENT.numpy(), [plant == p for p in ev.PLANTS]].astype(np.float32)
+
+
+def priv(s):
+    """What only the critic sees, from cheat.state(): mug mouth vs pot (cm), tilt, drops in mug / over pot / elsewhere,
+    hand-to-mug and mug height (cm)."""
+    return np.r_[s["mouth_cm"], s["tilt"], s["in_mug"], s["over"], s["elsewhere"], s["hand_cm"], s["up_cm"]].astype(np.float32)
+
+
+def mlp(n_in, n_out):
+    return nn.Sequential(nn.Linear(n_in, HIDDEN), nn.LayerNorm(HIDDEN), nn.ReLU(),
+                         nn.Linear(HIDDEN, HIDDEN), nn.LayerNorm(HIDDEN), nn.ReLU(), nn.Linear(HIDDEN, n_out))
+
+
+class Actor(nn.Module):
+    """obs -> noise (N_W,), tanh-squashed Gaussian; explore=False: its mean."""
+
+    def __init__(self):
+        super().__init__()
+        self.register_buffer("mean", torch.zeros(N_OBS))
+        self.register_buffer("std", torch.ones(N_OBS))
+        self.net = mlp(N_OBS, 2 * N_W)
+
+    def forward(self, o, explore=True):
+        mu, log_std = self.net((o - self.mean) / self.std).chunk(2, -1)
+        if not explore:
+            return torch.tanh(mu) * NOISE_MAX, None
+        log_std = log_std.clamp(-5, 1)
+        u = mu + log_std.exp() * torch.randn_like(mu)
+        logp = (-0.5 * ((u - mu) / log_std.exp()) ** 2 - log_std - 0.5 * np.log(2 * np.pi)).sum(-1)
+        logp = logp - (2 * (np.log(2) - u - F.softplus(-2 * u))).sum(-1)  # the tanh's change of density
+        return torch.tanh(u) * NOISE_MAX, logp
+
+
+class Critic(nn.Module):
+    """(obs, priv, noise) -> two Q estimates."""
+
+    def __init__(self):
+        super().__init__()
+        self.register_buffer("mean", torch.zeros(N_OBS + N_PRIV))
+        self.register_buffer("std", torch.ones(N_OBS + N_PRIV))
+        self.q1, self.q2 = mlp(N_OBS + N_PRIV + N_W, 1), mlp(N_OBS + N_PRIV + N_W, 1)
+
+    def forward(self, o, p, w):
+        x = torch.cat([(torch.cat([o, p], -1) - self.mean) / self.std, w / NOISE_MAX], -1)
+        return self.q1(x)[:, 0], self.q2(x)[:, 0]
+
+
+def actor():
+    """This process's actor, reloaded when actor.pt changes (training: after every round). Eval: from the Hub if not here."""
+    path = ACTOR
+    if not path.exists():
+        from huggingface_hub import hf_hub_download
+        path = hf_hub_download(HUB, f"worldmodel/dsrl/{cheat.MODEL}/actor.pt", repo_type="dataset")
+    mtime = os.path.getmtime(path)
+    if _w.get("mtime") != mtime:
+        a = Actor()
+        a.load_state_dict(torch.load(path, weights_only=True))
+        _w.update(actor=a.eval(), mtime=mtime)
+    return _w["actor"]
+
+
+def pick(model, frame, task, s):
+    """cheat's noise_policy: the chunk SmolVLA denoises from the actor's noise; the replan is recorded."""
+    o = obs(frame, task)
+    with torch.no_grad():
+        w = actor()(torch.from_numpy(o)[None], explore=TRAIN)[0][0]
+    e = cheat._run["env"].env
+    st = e.watering_stats()
+    _w["steps"].append(dict(obs=o, priv=priv(s), w=w.numpy(), good=st["target"],
+                            bad=st["spilled"] + sum(st[p] for p in e.pot_names if p != e.target_pot)))
+    policy, pre, post = model
+    cfg = policy.config
+    noise = torch.zeros(1, cfg.chunk_size, cfg.max_action_dim)
+    noise[0, :NOISE_STEPS, :N_A] = w.view(NOISE_STEPS, N_A)
+    batch = {key: torch.from_numpy(frame[key]).permute(2, 0, 1).float().div(255)[None] for key in CAMERAS}
+    batch["observation.state"] = torch.from_numpy(frame["observation.state"])[None]
+    batch["task"] = [task]
+    with torch.inference_mode():
+        chunk = policy.predict_action_chunk(pre(batch), noise=noise.to(cfg.device))
+    return post(chunk)[0, :ev.N_ACTION_STEPS].cpu().numpy()
+
+
+def random_start(rng):
+    """A mug start (cm) in AREA, at least KEEP_OUT from spots 5-8 (as judge_full.py)."""
+    while True:
+        xy = tuple(rng.uniform(*AREA))
+        if min(np.hypot(*np.subtract(xy, ev.SPOTS[s])) for s in (5, 6, 7, 8)) > KEEP_OUT:
+            return xy
+
+
+def reset(env, spot, rng, jitter=ev.MUG_JITTER):
+    if spot == 0:  # evaluate.reset reads the start from SPOTS
+        ev.SPOTS[0] = random_start(rng)
+    return _reset(env, spot, rng, 0.0 if spot == 0 else jitter)
+
+
+def trial(*args, **kwargs):
+    """pour's trial; training: its replans -> data/<unit>.npz, with the drops at the end."""
+    _w["steps"] = []
+    r = _trial(*args, **kwargs)
+    if TRAIN and _w["steps"]:
+        (OUT / "data").mkdir(parents=True, exist_ok=True)
+        rows = _w["steps"]
+        np.savez(OUT / "data" / f"{_w['unit']}.npz", end_good=r["in_target"], end_bad=r["in_wrong"] + r["spilled"],
+                 watered=r["watered"], **{k: np.array([row[k] for row in rows]) for k in rows[0]})
+    return r
+
+
+def run_unit(unit, *args, **kwargs):
+    _w["unit"] = unit
+    return _run_unit(unit, *args, **kwargs)
+
+
+def transitions(files):
+    """npz files -> tensors obs, priv, noise, reward, next obs, next priv, done (one row per replan)."""
+    cols = {k: [] for k in ("o", "p", "w", "r", "o2", "p2", "d")}
+    for f in files:
+        z = np.load(f)
+        good, bad = np.r_[z["good"], z["end_good"]], np.r_[z["bad"], z["end_bad"]]
+        n = len(z["w"])
+        cols["o"].append(z["obs"]), cols["p"].append(z["priv"]), cols["w"].append(z["w"])
+        cols["r"].append(np.diff(good) - np.diff(bad))
+        cols["o2"].append(np.r_[z["obs"][1:], z["obs"][-1:]]), cols["p2"].append(np.r_[z["priv"][1:], z["priv"][-1:]])
+        cols["d"].append(np.arange(n) == n - 1)
+    return {k: torch.from_numpy(np.concatenate(v).astype(np.float32)) for k, v in cols.items()}
+
+
+def new_learner():
+    a, c = Actor(), Critic()
+    t = Critic()
+    t.load_state_dict(c.state_dict())
+    log_alpha = torch.zeros(1, requires_grad=True)
+    return dict(actor=a, critic=c, target=t, log_alpha=log_alpha, round=0, curve=[],
+                opt_a=torch.optim.Adam(a.parameters(), LR), opt_c=torch.optim.Adam(c.parameters(), LR),
+                opt_alpha=torch.optim.Adam([log_alpha], LR))
+
+
+def update(L, data, steps, dev):
+    """steps SAC gradient steps on data (transitions()); returns the last critic loss, Q and alpha."""
+    a, c, t = L["actor"].to(dev), L["critic"].to(dev), L["target"].to(dev)
+    log_alpha = L["log_alpha"]
+    d = {k: v.to(dev) for k, v in data.items()}
+    n = len(d["r"])
+    for _ in range(steps):
+        i = torch.randint(n, (BATCH,), device=dev)
+        alpha = log_alpha.exp().item()
+        with torch.no_grad():
+            w2, logp2 = a(d["o2"][i])
+            y = d["r"][i] + GAMMA * (1 - d["d"][i]) * (torch.min(*t(d["o2"][i], d["p2"][i], w2)) - alpha * logp2)
+        q1, q2 = c(d["o"][i], d["p"][i], d["w"][i])
+        loss_c = F.mse_loss(q1, y) + F.mse_loss(q2, y)
+        L["opt_c"].zero_grad()
+        loss_c.backward()
+        L["opt_c"].step()
+        w, logp = a(d["o"][i])
+        q = torch.min(*c(d["o"][i], d["p"][i], w))
+        loss_a = (alpha * logp - q).mean()
+        L["opt_a"].zero_grad()
+        loss_a.backward()
+        L["opt_a"].step()
+        loss_alpha = -(log_alpha * (logp.detach().cpu() - N_W).mean())  # target entropy -N_W
+        L["opt_alpha"].zero_grad()
+        loss_alpha.backward()
+        L["opt_alpha"].step()
+        with torch.no_grad():
+            for pt, pc in zip(t.parameters(), c.parameters()):
+                pt.lerp_(pc, TAU)
+    return loss_c.item(), q.mean().item(), log_alpha.exp().item()
+
+
+def save(L):
+    """learner.pt (to resume) and actor.pt (what the workers load).
+    shortcut: the optimizers' state isn't kept (it lives on the GPU): a resumed run restarts Adam's moments"""
+    torch.save({k: (v.state_dict() if hasattr(v, "state_dict") else v) for k, v in L.items() if not k.startswith("opt")},
+               OUT / "learner.pt")
+    torch.save({k: v.cpu() for k, v in L["actor"].state_dict().items()}, OUT / "actor.tmp")
+    os.replace(OUT / "actor.tmp", ACTOR)  # whole file at once: a worker never reads half of it
+
+
+def load():
+    L = new_learner()
+    if (OUT / "learner.pt").exists():
+        s = torch.load(OUT / "learner.pt", weights_only=False)
+        for k, v in s.items():
+            if hasattr(L.get(k), "load_state_dict"):
+                L[k].load_state_dict(v)
+            elif k == "log_alpha":
+                L[k].data.copy_(v)
+            else:
+                L[k] = v
+    return L
+
+
+def train():
+    """ROUNDS x (EPISODES pour trials with the current actor, then UTD SAC steps per new replan)."""
+    OUT.mkdir(parents=True, exist_ok=True)
+    dev = runs.device()
+    L = load()
+    save(L)  # round 0's workers need an actor (fresh: noise about N(0, 1), like the plain policy)
+    for rnd in range(L["round"], ROUNDS):
+        units = [f"{p}-0-{rnd * 100 + i}" for i in range(EPISODES // len(ev.PLANTS)) for p in ev.PLANTS]
+        ev.UNITS = units
+        ev.main()
+        files = sorted((OUT / "data").glob("*.npz"))
+        mine = [f for f in files if f.stem in units]
+        if not mine:
+            print(f"round {rnd}: no pour in this round (none carried?), next round")
+            continue
+        data = transitions(files)
+        if rnd == 0 or not L["curve"]:  # input scaling, fixed from the first round's states
+            L["actor"].mean.copy_(data["o"].mean(0)), L["actor"].std.copy_(data["o"].std(0).clamp(min=1e-2))
+            x = torch.cat([data["o"], data["p"]], -1)
+            for c in (L["critic"], L["target"]):
+                c.mean.copy_(x.mean(0)), c.std.copy_(x.std(0).clamp(min=1e-2))
+        new = transitions(mine)
+        t0 = time.time()
+        loss, q, alpha = update(L, data, UTD * len(new["r"]), dev)
+        ends = [np.load(f) for f in mine]
+        row = dict(round=rnd, episodes=len(mine), replans=len(new["r"]), all_replans=len(data["r"]),
+                   drops=round(float(np.mean([z["end_good"] for z in ends])), 2),
+                   watered=round(float(np.mean([z["watered"] for z in ends])), 2),
+                   reward=round(float(new["r"].sum()) / len(mine), 2), critic_loss=round(loss, 3), q=round(q, 2),
+                   alpha=round(alpha, 4), update_s=round(time.time() - t0))
+        L["curve"].append(row)
+        L["round"] = rnd + 1
+        for k in ("actor", "critic", "target"):
+            L[k].cpu()
+        save(L)
+        (OUT / "dsrl.json").write_text(json.dumps(L["curve"], indent=1))
+        print(f"\n=== DSRL round {rnd}: {row}\n", flush=True)
+
+
+_reset, _trial, _run_unit = ev.reset, cheat.trial, ev.run_unit
+# at import, so the spawned eval workers get them too
+cheat.noise_policy = pick
+cheat.trial, ev.run_unit = trial, run_unit
+if TRAIN:
+    ev.reset = reset
+    ev.trial_seed = lambda plant, spot, t: SEED + 10_000 * ev.PLANTS.index(plant) + t
+    cheat.RESULTS = ev.RESULTS = OUT.parent
+
+if __name__ == "__main__":
+    train() if TRAIN else ev.main()

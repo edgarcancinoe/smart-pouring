@@ -38,6 +38,7 @@ RESULTS = Path(__file__).parent / "results" / ARM
 _act, _reset, _trial = ev.act, ev.reset, ev.trial
 _run = {}  # this process's running trial: env, mug start, lifted, log
 on_choice = None  # judge.py: f(frame, chunks, outcomes, pick) at each choice: the K chunks and state() after each one's look-ahead
+noise_policy = None  # dsrl.py: f(model, frame, task, state now) -> the chunk to run, denoised from its actor's noise
 
 
 def snapshot(e):
@@ -187,6 +188,8 @@ def _choose(model, frame, task):
         task += PROMPT
     if ARM == "plain" or not look(s):
         return _act(model, frame, task)
+    if noise_policy:
+        return noise_policy(model, frame, task, s)
 
     policy, pre, post = model
     batch = {key: torch.from_numpy(frame[key]).permute(2, 0, 1).float().div(255)[None].repeat(K, 1, 1, 1) for key in CAMERAS}
