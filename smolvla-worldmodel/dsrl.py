@@ -28,6 +28,8 @@ Usage: ./run dsrl [--jobs 9]        train -> results/dsrl/<model>/
        SAMPLE=1 ./run pour-dsrl ...  the same with sampled pushes (as in training), not the actor's mean
        ./run starts-plain | starts-dsrl [--jobs 18]  training-style random mug starts with new seeds, nothing trained:
                                     plain vs the actor (SAMPLE=1: sampled pushes) -> results/starts-<arm>[-sampled]/
+       ./run replay-plain [--jobs 9]  the plain policy on the exact trials of the first run's rounds REPLAY_ROUNDS
+                                    -> results/replay-plain/ (were those starts easy, or was the actor better?)
        ./run full-dsrl [--jobs 18]  the whole task (grasp, the actor's pour, put back) as the README headline: spots 1-8,
                                     5 trials per plant x spot, 3 seed sets, 90 s -> results/full-dsrl/[s<seed>/]<model>/
 """
@@ -51,12 +53,14 @@ from dataset.export_lerobot import CAMERAS
 from judge_check import HUB
 
 ROOT = cheat.RESULTS.parent  # results/ (pour.py, old or new, points cheat.RESULTS at results/pour-<arm>)
-TRAIN = os.environ.get("DSRL") not in ("eval", "full", "starts")  # pour-dsrl: DSRL=eval, full-dsrl: full, starts-*: starts
+TRAIN = os.environ.get("DSRL") not in ("eval", "full", "starts", "replay")  # pour-dsrl: eval, full-dsrl: full, starts-*: starts, replay-plain: replay
 FULL = os.environ.get("DSRL") == "full"
 STARTS = os.environ.get("DSRL") == "starts"
 SAMPLE = os.environ.get("SAMPLE") == "1"  # outside training: sampled pushes as in training (default: the actor's mean)
 STARTS_SEED = 70_000    # starts-*' trial seeds: none of training's (40_000 + 10_000 x plant + t < 65_000)
 STARTS_TRIALS = 24      # starts-* trials per plant
+REPLAY = os.environ.get("DSRL") == "replay"
+REPLAY_ROUNDS = range(16, 22)  # replay-plain: the first run's rounds poured by its 10-direction actor (89% watered)
 FULL_SEEDS = (0, 10_000, 20_000)  # evaluate.SEED of the headline's 3 seed sets (README: 3 seeds x 120 trials)
 
 
@@ -470,6 +474,11 @@ if TRAIN:
     ev.reset = reset
     ev.trial_seed = lambda plant, spot, t: SEED + 10_000 * ev.PLANTS.index(plant) + t
     cheat.RESULTS = ev.RESULTS = OUT / "eval" / EVAL if EVAL else OUT.parent
+if REPLAY:  # those rounds' exact trials (same starts, seeds and so grasps), poured by ARM instead of the actor then
+    ev.reset = reset
+    ev.trial_seed = lambda plant, spot, t: SEED + 10_000 * ev.PLANTS.index(plant) + t
+    ev.UNITS = [f"{p}-0-{r * 100 + i}" for r in REPLAY_ROUNDS for i in range(EPISODES // len(ev.PLANTS)) for p in ev.PLANTS]
+    cheat.RESULTS = ev.RESULTS = ROOT / f"replay-{cheat.ARM}"
 if STARTS:  # random starts drawn as in training, new seeds; nothing is trained or saved beyond the trial results
     ev.reset = reset
     ev.trial_seed = lambda plant, spot, t: STARTS_SEED + 10_000 * ev.PLANTS.index(plant) + t
