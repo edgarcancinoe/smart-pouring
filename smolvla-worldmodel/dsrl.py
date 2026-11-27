@@ -8,7 +8,9 @@ The critic also sees the sim (mug mouth vs pot, tilt, drops: cheat.state), the a
 Training runs in rounds: EPISODES pour trials with the current actor (random mug starts, as judge_full.py: away from the
 benchmark's spots 5-8), then SAC updates on every transition so far, then the next round. Resumable: a rerun skips the
 finished trials and continues from learner.pt.
--> results/dsrl/<model>/: <unit>.json + data/<unit>.npz per trial, actor.pt, learner.pt, dsrl.json (per round)
+-> results/dsrl/<model>/: <unit>.json + data/<unit>.npz per trial, actor.pt, learner.pt, dsrl.json + dsrl.png (per
+round); after every round all but the videos -> the Hub's worldmodel/dsrl/<model>/, and the round's numbers -> W&B
+(project WANDB_PROJECT; needs `uv run wandb login` once per machine)
 shortcut: the actor sees no camera (the pots don't move, the plant says which); add SigLIP features if it plateaus
 shortcut: the actor sets the noise of the chunk's first NOISE_STEPS actions (the ones run), the rest of the noise is 0
 shortcut: a trial that hangs stalls its round (as in pour-plain): stop and rerun, it resumes
@@ -47,6 +49,7 @@ BATCH = 256
 LR = 3e-4
 TAU = 0.005             # target critic update rate
 SEED = 40_000           # training trial seeds: no eval, judge or distill seed
+WANDB_PROJECT = "smart-pouring"  # live curves at wandb.ai/<you>/smart-pouring, as smolvla-finetune/train.py
 AREA = ((-24.0, 14.0), (27.0, 30.0))  # cm: random mug starts, as judge_full.py (importing it would patch evaluate)
 KEEP_OUT = 4.0          # cm from spots 5-8
 OUT = cheat.RESULTS.parent / "dsrl" / cheat.MODEL
@@ -256,11 +259,39 @@ def load():
     return L
 
 
+def report(curve):
+    """dsrl.json and dsrl.png (drops per pour and critic loss per round), then the run so far -> the Hub, so progress
+    can be watched from anywhere; a failed upload only warns."""
+    import matplotlib.pyplot as plt
+    (OUT / "dsrl.json").write_text(json.dumps(curve, indent=1))
+    r = [c["round"] for c in curve]
+    fig, ax = plt.subplots(1, 2, figsize=(10, 3.5))
+    ax[0].plot(r, [c["drops"] for c in curve], "o-")
+    ax[0].set(xlabel="round", ylabel="drops in the pot per pour (of 10)", title="pour")
+    ax[1].plot(r, [c["critic_loss"] for c in curve], "o-")
+    ax[1].set(xlabel="round", ylabel="critic loss", yscale="log", title="critic")
+    fig.tight_layout()
+    fig.savefig(OUT / "dsrl.png", dpi=120)
+    plt.close(fig)
+    try:
+        from huggingface_hub import HfApi
+        HfApi().upload_folder(folder_path=OUT, repo_id=HUB, repo_type="dataset", path_in_repo=f"worldmodel/dsrl/{cheat.MODEL}",
+                              allow_patterns=["dsrl.json", "dsrl.png", "actor.pt", "learner.pt", "*.json", "data/*"],
+                              commit_message=f"DSRL round {curve[-1]['round']}")
+    except Exception as err:  # training goes on; the next round uploads everything again
+        print(f"upload to the Hub failed: {err}", flush=True)
+
+
 def train():
     """ROUNDS x (EPISODES pour trials with the current actor, then UTD SAC steps per new replan)."""
     OUT.mkdir(parents=True, exist_ok=True)
     dev = runs.device()
     L = load()
+    import wandb
+    L["wandb_id"] = L.get("wandb_id") or wandb.util.generate_id()  # kept in learner.pt: a resumed run continues the same W&B run
+    wandb.init(project=WANDB_PROJECT, name=f"dsrl-{cheat.MODEL}", id=L["wandb_id"], resume="allow",
+               config=dict(model=cheat.MODEL, rounds=ROUNDS, episodes=EPISODES, noise_steps=NOISE_STEPS,
+                           noise_max=NOISE_MAX, gamma=GAMMA, utd=UTD, batch=BATCH, lr=LR, tau=TAU))
     save(L)  # round 0's workers need an actor (fresh: noise about N(0, 1), like the plain policy)
     for rnd in range(L["round"], ROUNDS):
         units = [f"{p}-0-{rnd * 100 + i}" for i in range(EPISODES // len(ev.PLANTS)) for p in ev.PLANTS]
@@ -291,8 +322,10 @@ def train():
         for k in ("actor", "critic", "target"):
             L[k].cpu()
         save(L)
-        (OUT / "dsrl.json").write_text(json.dumps(L["curve"], indent=1))
+        report(L["curve"])
+        wandb.log(row, step=rnd)
         print(f"\n=== DSRL round {rnd}: {row}\n", flush=True)
+    wandb.finish()
 
 
 _reset, _trial, _run_unit = ev.reset, cheat.trial, ev.run_unit
