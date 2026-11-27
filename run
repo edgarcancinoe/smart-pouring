@@ -65,7 +65,7 @@
 #   CURVE=1 ./run judge-train      the judge on 25-100% of the trials: would more data help? -> curve.json
 
 cd "$(dirname "$0")" || exit 1
-export PYTHONPATH=. PYTHONWARNINGS=ignore PYTHONUNBUFFERED=1
+export PYTHONPATH=. PYTHONWARNINGS=ignore PYTHONUNBUFFERED=1 HF_HUB_DISABLE_PROGRESS_BARS=1  # no Hub download bars (eval workers re-read dataset stats every trial)
 py=.venv/bin/python
 [ -x "$py" ] || py=python3  # Colab / GPU machine: no uv environment
 gl=cgl; [ "$(uname)" = Linux ] && gl=egl  # offscreen rendering: macOS / headless Linux

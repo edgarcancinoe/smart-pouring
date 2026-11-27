@@ -275,7 +275,7 @@ def run_unit(unit, name, grasp=False, tally=None, lock=None):
 ev.act, ev.reset, ev.trial, ev.run_unit = act, reset, trial, run_unit
 ev.RESULTS, ev.MODELS, ev.TRIALS = RESULTS, [MODEL], 1  # TRIALS: one per unit (main's progress counts)
 ev.UNITS = [f"{p}-{s}-{t}" for p in ev.PLANTS for s in SPOTS for t in range(TRIALS)]
-ev.VERBOSE = True  # clock lines every PROGRESS_EVERY steps (the cheat's cost)
+ev.VERBOSE = ARM in ("cheat", "distance", "random")  # clock lines every PROGRESS_EVERY steps: only the slow look-ahead arms
 
 if __name__ == "__main__":
     ev.main()
