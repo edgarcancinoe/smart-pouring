@@ -18,7 +18,12 @@ shortcut: the actor sees no camera (the pots don't move, the plant says which); 
 shortcut: the directions are hand-picked (whole-chunk lean per action slot, tilt ramps); learn them if this plateaus
 shortcut: a trial that hangs stalls its round (as in pour-plain): stop and rerun, it resumes
 
+Held-out check while training: from round EVAL_FROM, every EVAL_EVERY rounds and after the last, the actor pours
+EVAL_UNITS (fixed random starts no training pour uses) with its mean push; plain pours them once, at the first check.
+Both go to W&B (eval_*, plain_*) beside the training pours, so the curve compares like with like.
+
 Usage: ./run dsrl [--jobs 9]        train -> results/dsrl/<model>/
+       DSRL_RUN=clean ./run dsrl    a separate run: results/dsrl-clean/<model>/, the Hub's worldmodel/dsrl-clean/
        ./run pour-dsrl [--jobs 9]   the pour benchmark at spots 5-8 with the trained actor (its mean noise) -> results/pour-dsrl/
        SAMPLE=1 ./run pour-dsrl ...  the same with sampled pushes (as in training), not the actor's mean
        ./run starts-plain | starts-dsrl [--jobs 18]  training-style random mug starts with new seeds, nothing trained:
@@ -65,7 +70,7 @@ if FULL:  # whole episodes: pour.py's end-of-pour rules off; its carried() stays
     ev.HIT = "success"
     ev.UNITS = [f"{p}-{s}-{t}" for p in ev.PLANTS for s in range(1, 9) for t in range(pour.TRIALS)]
     cheat.RESULTS = ev.RESULTS = full_results(ev.SEED)
-ROUNDS = 40             # the first 12 replay the 70-number run's pours (its data, projected on the directions)
+ROUNDS = 30
 EPISODES = 18           # pour trials per round (a third per plant)
 NOISE_STEPS = 10        # chunk steps the directions span (= the N_ACTION_STEPS run)
 Z_MAX = 2.0             # the actor's push along each direction is squashed to +- this (plain noise: N(0, 1) along each)
@@ -82,9 +87,13 @@ SEED = 40_000           # training trial seeds: no eval, judge or distill seed
 WANDB_PROJECT = "smart-pouring"  # live curves at wandb.ai/<you>/smart-pouring, as smolvla-finetune/train.py
 AREA = ((-24.0, 14.0), (27.0, 30.0))  # cm: random mug starts, as judge_full.py (importing it would patch evaluate)
 KEEP_OUT = 4.0          # cm from spots 5-8
-OUT = cheat.RESULTS.parent / "dsrl" / cheat.MODEL
+RUN = os.environ.get("DSRL_RUN", "")  # a run's name: its own folders here and on the Hub ("" = the first run's)
+EVAL = os.environ.get("DSRL_EVAL", "")  # set by train() for its held-out check: "plain" or the round
+EVAL_FROM, EVAL_EVERY = 15, 5  # held-out check from this round, then every EVAL_EVERY rounds and after the last
+EVAL_UNITS = [f"{p}-0-{9000 + i}" for i in range(6) for p in ev.PLANTS]  # 18 fixed random starts: t >= 9000, no training round's
+OUT = ROOT / f"dsrl{'-' + RUN if RUN else ''}" / cheat.MODEL
 ACTOR = OUT / "actor.pt"
-HUB_DIR = f"worldmodel/dsrl/{cheat.MODEL}"  # report() uploads OUT here (rltoken.py: its own)
+HUB_DIR = f"worldmodel/dsrl{'-' + RUN if RUN else ''}/{cheat.MODEL}"  # report() uploads OUT here (rltoken.py: its own)
 N_A = len(ev.OPEN)      # action dims (7)
 N_W = NOISE_STEPS * N_A  # noise numbers of the steps run
 N_OBS = 8 + 3 + len(ev.PLANTS)  # state, grasp memory, plant
@@ -185,7 +194,7 @@ def pick(model, frame, task, s):
     directions (w = B z + the noise's part off the directions); the replan and its noise w are recorded."""
     o = obs(frame, task)
     with torch.no_grad():
-        z = actor()(torch.from_numpy(o)[None], explore=TRAIN or SAMPLE)[0][0]
+        z = actor()(torch.from_numpy(o)[None], explore=(TRAIN and not EVAL) or SAMPLE)[0][0]
     policy, pre, post = model
     cfg = policy.config
     noise = torch.randn(1, cfg.chunk_size, cfg.max_action_dim)  # plain policy's noise everywhere...
@@ -222,7 +231,7 @@ def trial(*args, **kwargs):
     """pour's trial; training: its replans -> data/<unit>.npz, with the drops at the end."""
     _w["steps"] = []
     r = _trial(*args, **kwargs)
-    if TRAIN and _w["steps"]:
+    if TRAIN and not EVAL and _w["steps"]:  # the held-out check's pours never train
         (OUT / "data").mkdir(parents=True, exist_ok=True)
         rows = _w["steps"]
         np.savez(OUT / "data" / f"{_w['unit']}.npz", end_good=r["in_target"], end_bad=r["in_wrong"] + r["spilled"],
@@ -377,6 +386,23 @@ def catch_up(L, update_fn, transitions_fn, scale_fn, dev):
           f"new pours start at round {L['round']}", flush=True)
 
 
+def held_out(tag, arm):
+    """EVAL_UNITS poured by arm ("plain", or "dsrl": the current actor's mean push) -> OUT/eval/<tag>/; returns
+    carried, watered (share of carried) and drops (per carried pour). Resumable like any eval (done trials are kept).
+    shortcut: the workers learn arm and tag from env vars, so it needs --jobs > 1 (one job runs in this process)"""
+    os.environ.update(DSRL_EVAL=str(tag), ARM=arm)
+    ev.UNITS, cheat.RESULTS, ev.RESULTS = EVAL_UNITS, OUT / "eval" / str(tag), OUT / "eval" / str(tag)
+    try:
+        ev.main()
+    finally:
+        os.environ.pop("DSRL_EVAL"), os.environ.update(ARM="dsrl")
+        cheat.RESULTS = ev.RESULTS = OUT.parent
+    T = [json.load(open(f))["trials"][0] for f in (OUT / "eval" / str(tag) / cheat.MODEL).glob("*.json")]
+    c = [x for x in T if x.get("carried")]
+    return dict(carried=len(c), watered=round(sum(x["watered"] for x in c) / max(len(c), 1), 3),
+                drops=round(sum(x["in_target"] for x in c) / max(len(c), 1), 2))
+
+
 def train():
     """ROUNDS x (EPISODES pour trials with the current actor, then UTD SAC steps per new replan)."""
     OUT.mkdir(parents=True, exist_ok=True)
@@ -384,7 +410,7 @@ def train():
     L = load()
     import wandb
     L["wandb_id"] = L.get("wandb_id") or f"dsrl-{int(time.time())}"  # kept in learner.pt: a resumed run continues the same W&B run
-    wandb.init(project=WANDB_PROJECT, name=f"dsrl-dirs{N_Z}-{cheat.MODEL}", id=L["wandb_id"], resume="allow",
+    wandb.init(project=WANDB_PROJECT, name=f"dsrl-{RUN or 'dirs' + str(N_Z)}-{cheat.MODEL}", id=L["wandb_id"], resume="allow",
                config=dict(model=cheat.MODEL, rounds=ROUNDS, episodes=EPISODES, noise_steps=NOISE_STEPS,
                            directions=N_Z, z_max=Z_MAX, leash=LEASH, reward_scale=REWARD_SCALE, warmup=WARMUP,
                            gamma=GAMMA, utd=UTD, batch=BATCH, lr=LR, tau=TAU))
@@ -411,10 +437,14 @@ def train():
                    watered=round(float(np.mean([z["watered"] for z in ends])), 2),
                    reward=round(float(new["r"].sum()) / len(mine), 2), **{k: round(v, 4) for k, v in stats.items()},
                    update_s=round(time.time() - t0))
-        L["curve"].append(row)
         L["round"] = rnd + 1
         for k in ("actor", "critic", "target"):
             L[k].cpu()
+        save(L)  # first: the held-out check pours with this round's actor
+        if rnd >= EVAL_FROM and ((rnd - EVAL_FROM) % EVAL_EVERY == 0 or rnd == ROUNDS - 1):
+            L["plain_eval"] = L.get("plain_eval") or held_out("plain", "plain")
+            row.update({f"plain_{k}": v for k, v in L["plain_eval"].items()}, **{f"eval_{k}": v for k, v in held_out(rnd, "dsrl").items()})
+        L["curve"].append(row)
         save(L)
         report(L["curve"])
         wandb.log(row, step=rnd)
@@ -429,7 +459,7 @@ cheat.trial, ev.run_unit = trial, run_unit
 if TRAIN:
     ev.reset = reset
     ev.trial_seed = lambda plant, spot, t: SEED + 10_000 * ev.PLANTS.index(plant) + t
-    cheat.RESULTS = ev.RESULTS = OUT.parent
+    cheat.RESULTS = ev.RESULTS = OUT / "eval" / EVAL if EVAL else OUT.parent
 if STARTS:  # random starts drawn as in training, new seeds; nothing is trained or saved beyond the trial results
     ev.reset = reset
     ev.trial_seed = lambda plant, spot, t: STARTS_SEED + 10_000 * ev.PLANTS.index(plant) + t
