@@ -58,6 +58,7 @@ RELEASE_CM = 8.0        # ... as released with the gripper point this far from i
 REST_S = 1.0            # end the trial once a lifted or knocked-over mug has rested, released, this long
 VIDEO_TRIALS = 1        # trials per unit filmed
 PRINT_EVERY = 30        # s between the progress lines (trials done, lifted/succeeded so far, time left)
+HIT = "success"         # the trial result the progress lines count (pour.py: "watered", its trials end before the put back)
 VERBOSE = False         # also print every trial, and a clock line every PROGRESS_EVERY steps of it
 PROGRESS_EVERY = 200    # control steps between those clock lines
 VIDEO_EVERY = 2         # film every Nth control step
@@ -309,7 +310,7 @@ def main():
     if missing := [m for m in wanted if m not in models]:
         print(f"not on the Hub yet (skipped): {', '.join(missing)}")
     out = RESULTS / f"grasp-n{N_ACTION_STEPS}" if args.grasp else RESULTS
-    label = "lifted" if args.grasp else "succeeded"
+    label = "lifted" if args.grasp else "succeeded" if HIT == "success" else HIT
     manager = multiprocessing.Manager()  # the workers' shared trial tally
     for name in models:
         todo = [u for u in UNITS if not (out / name / f"{u}.json").exists()]

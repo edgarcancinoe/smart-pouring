@@ -251,20 +251,24 @@ def run_unit(unit, name, grasp=False, tally=None, lock=None):
     r = trial(ev.scene(plant), ev.load_model(name), plant, spot, ev.trial_seed(plant, spot, t),
               out / "videos" / f"{plant}-{spot}.mp4" if t == 0 else None)
     mark = lambda ok: "yes" if ok else "NO"
+    whole = ev.HIT == "success"  # else pour-only: no put back, the trial ends with the pour (r["ended"])
+    end = (f"put back {mark(r['placed'])} -> {'SUCCESS' if r['success'] else 'fail'}" if whole
+           else f"ended: {r.get('ended')}")
     print(f"  {unit}: lifted {mark(r['lifted'])} · watered {mark(r['watered'])} ({r['in_target']}/10) · "
-          f"put back {mark(r['placed'])} -> {'SUCCESS' if r['success'] else 'fail'} ({r['steps']} steps, {r['seconds']:.0f} s)", flush=True)
+          f"{end} ({r['steps']} steps, {r['seconds']:.0f} s)", flush=True)
     if tally is not None:
         with lock:
             tally["trials"] += 1
-            tally["hits"] += r["success"]
+            tally["hits"] += r[ev.HIT]
             for k in ("lifted", "watered", "placed"):
                 tally[k] = tally.get(k, 0) + r[k]
-            print(f"  so far ({ARM}): {tally['trials']} trials · lifted {tally['lifted']} · watered {tally['watered']} · "
-                  f"put back {tally['placed']} · success {tally['hits']}", flush=True)
+            print(f"  so far ({ARM}): {tally['trials']} trials · lifted {tally['lifted']} · watered {tally['watered']}"
+                  + (f" · put back {tally['placed']} · success {tally['hits']}" if whole else ""), flush=True)
     (out / f"{unit}.json").write_text(json.dumps(dict(
         model=name, plant=plant, spot=spot, spot_cm=ev.SPOTS[spot], trained_spot=spot in ev.TRAINED_SPOTS,
         n_action_steps=ev.N_ACTION_STEPS, max_steps=ev.MAX_STEPS, trials=[r]), indent=1))
-    return dict(clip=unit, summary="success" if r["success"] else "fail")
+    return dict(clip=unit, summary=("success" if r["success"] else "fail") if whole else
+                ("watered" if r["watered"] else "not watered"))
 
 
 # at import, so the spawned eval workers get them too

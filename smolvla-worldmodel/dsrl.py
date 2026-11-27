@@ -45,6 +45,8 @@ NOISE_MAX = 2.0         # the actor's noise is squashed to +- this (SmolVLA's no
 HIDDEN = 256
 GAMMA = 0.95            # per replan (0.5 s): about 10 s ahead
 UTD = 10                # gradient steps per new transition
+REWARD_SCALE = 10.0     # reward x this in the critic: else SAC's entropy bonus over N_W noise numbers dwarfs a few drops
+WARMUP = 3              # rounds whose updates train only the critic: the actor stays random until the critic has data
 BATCH = 256
 LR = 3e-4
 TAU = 0.005             # target critic update rate
@@ -203,8 +205,9 @@ def new_learner():
                 opt_alpha=torch.optim.Adam([log_alpha], LR))
 
 
-def update(L, data, steps, dev):
-    """steps SAC gradient steps on data (transitions()); returns the last critic loss, Q and alpha."""
+def update(L, data, steps, dev, actor=True):
+    """steps SAC gradient steps on data (transitions()); actor=False: the critic only (WARMUP).
+    Returns the last critic loss, the critic's Q of the actor's noise and alpha."""
     a, c, t = L["actor"].to(dev), L["critic"].to(dev), L["target"].to(dev)
     log_alpha = L["log_alpha"]
     d = {k: v.to(dev) for k, v in data.items()}
@@ -214,7 +217,7 @@ def update(L, data, steps, dev):
         alpha = log_alpha.exp().item()
         with torch.no_grad():
             w2, logp2 = a(d["o2"][i])
-            y = d["r"][i] + GAMMA * (1 - d["d"][i]) * (torch.min(*t(d["o2"][i], d["p2"][i], w2)) - alpha * logp2)
+            y = REWARD_SCALE * d["r"][i] + GAMMA * (1 - d["d"][i]) * (torch.min(*t(d["o2"][i], d["p2"][i], w2)) - alpha * logp2)
         q1, q2 = c(d["o"][i], d["p"][i], d["w"][i])
         loss_c = F.mse_loss(q1, y) + F.mse_loss(q2, y)
         L["opt_c"].zero_grad()
@@ -222,6 +225,8 @@ def update(L, data, steps, dev):
         L["opt_c"].step()
         w, logp = a(d["o"][i])
         q = torch.min(*c(d["o"][i], d["p"][i], w))
+        if not actor:
+            continue
         loss_a = (alpha * logp - q).mean()
         L["opt_a"].zero_grad()
         loss_a.backward()
@@ -310,7 +315,7 @@ def train():
                 c.mean.copy_(x.mean(0)), c.std.copy_(x.std(0).clamp(min=1e-2))
         new = transitions(mine)
         t0 = time.time()
-        loss, q, alpha = update(L, data, UTD * len(new["r"]), dev)
+        loss, q, alpha = update(L, data, UTD * len(new["r"]), dev, actor=rnd >= WARMUP)
         ends = [np.load(f) for f in mine]
         row = dict(round=rnd, episodes=len(mine), replans=len(new["r"]), all_replans=len(data["r"]),
                    drops=round(float(np.mean([z["end_good"] for z in ends])), 2),

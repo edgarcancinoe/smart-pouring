@@ -68,6 +68,7 @@ _reset = cheat.reset
 # at import, so the spawned eval workers get them too
 cheat.carried, cheat.trial = carried, trial
 ev.act, ev.reset = act, reset
+ev.HIT = "watered"  # progress lines: a pour trial ends before the put back, so it never counts as a success
 cheat.RESULTS = ev.RESULTS = cheat.RESULTS.parent / f"pour-{cheat.ARM}"
 ev.UNITS = [f"{p}-{s}-{t}" for p in ev.PLANTS for s in cheat.SPOTS for t in range(TRIALS)]
 
