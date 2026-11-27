@@ -45,6 +45,7 @@ import runs
 from dataset.export_lerobot import CAMERAS
 from judge_check import HUB
 
+ROOT = cheat.RESULTS.parent  # results/ (pour.py, old or new, points cheat.RESULTS at results/pour-<arm>)
 TRAIN = os.environ.get("DSRL") not in ("eval", "full", "starts")  # pour-dsrl: DSRL=eval, full-dsrl: full, starts-*: starts
 FULL = os.environ.get("DSRL") == "full"
 STARTS = os.environ.get("DSRL") == "starts"
@@ -56,7 +57,7 @@ FULL_SEEDS = (0, 10_000, 20_000)  # evaluate.SEED of the headline's 3 seed sets 
 
 def full_results(seed):
     """full-dsrl's folder for a seed set, laid out as evaluate's (seed 0: no subfolder)."""
-    return pour.RESULTS_ROOT / "full-dsrl" / ("" if seed == 0 else f"s{seed}")
+    return ROOT / "full-dsrl" / ("" if seed == 0 else f"s{seed}")
 
 
 if FULL:  # whole episodes: pour.py's end-of-pour rules off; its carried() stays the actor's gate, as in training
@@ -433,7 +434,7 @@ if STARTS:  # random starts drawn as in training, new seeds; nothing is trained 
     ev.reset = reset
     ev.trial_seed = lambda plant, spot, t: STARTS_SEED + 10_000 * ev.PLANTS.index(plant) + t
     ev.UNITS = [f"{p}-0-{t}" for t in range(STARTS_TRIALS) for p in ev.PLANTS]
-    cheat.RESULTS = ev.RESULTS = pour.RESULTS_ROOT / f"starts-{cheat.ARM}{'-sampled' if SAMPLE and cheat.ARM == 'dsrl' else ''}"
+    cheat.RESULTS = ev.RESULTS = ROOT / f"starts-{cheat.ARM}{'-sampled' if SAMPLE and cheat.ARM == 'dsrl' else ''}"
 
 
 def full():
