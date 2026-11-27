@@ -21,6 +21,7 @@ POUR_STEPS = 600        # control steps the pour may take once carried (30 s)
 SETTLE_STEPS = 20       # steps run once the mug is empty, for the drops to land (1 s)
 PRE_STEPS = ev.MAX_STEPS  # not carried by then: not a pour trial (the full eval's whole episode; was 500)
 MAX_STEPS = ev.MAX_STEPS
+RESULTS_ROOT = cheat.RESULTS.parent  # results/ (before this file points cheat.RESULTS at pour-<arm>)
 
 _act, _trial = cheat.act, cheat.trial
 
