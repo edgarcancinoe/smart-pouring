@@ -9,7 +9,8 @@ The critic also sees the sim (mug mouth vs pot, tilt, drops: cheat.state), the a
 
 Training runs in rounds: EPISODES pour trials with the current actor (random mug starts, as judge_full.py: away from the
 benchmark's spots 5-8), then SAC updates on every transition so far, then the next round. Resumable: a rerun skips the
-finished trials and continues from learner.pt.
+finished trials and continues from learner.pt. A fresh learner beside recorded pours (an earlier learner's, moved aside)
+first learns from all of them at once, then pours from the next round on (catch_up).
 -> results/dsrl/<model>/: <unit>.json + data/<unit>.npz per trial, actor.pt, learner.pt, dsrl.json + dsrl.png (per
 round); after every round all but the videos -> the Hub's worldmodel/dsrl/<model>/, and the round's numbers -> W&B
 (project WANDB_PROJECT; needs `uv run wandb login` once per machine)
@@ -59,6 +60,7 @@ AREA = ((-24.0, 14.0), (27.0, 30.0))  # cm: random mug starts, as judge_full.py 
 KEEP_OUT = 4.0          # cm from spots 5-8
 OUT = cheat.RESULTS.parent / "dsrl" / cheat.MODEL
 ACTOR = OUT / "actor.pt"
+HUB_DIR = f"worldmodel/dsrl/{cheat.MODEL}"  # report() uploads OUT here (rltoken.py: its own)
 N_A = len(ev.OPEN)      # action dims (7)
 N_W = NOISE_STEPS * N_A  # noise numbers of the steps run
 N_OBS = 8 + 3 + len(ev.PLANTS)  # state, grasp memory, plant
@@ -309,11 +311,39 @@ def report(curve):
     plt.close(fig)
     try:
         from huggingface_hub import HfApi
-        HfApi().upload_folder(folder_path=OUT, repo_id=HUB, repo_type="dataset", path_in_repo=f"worldmodel/dsrl/{cheat.MODEL}",
+        HfApi().upload_folder(folder_path=OUT, repo_id=HUB, repo_type="dataset", path_in_repo=HUB_DIR,
                               allow_patterns=["dsrl.json", "dsrl.png", "actor.pt", "learner.pt", "*.json", "data/*"],
                               commit_message=f"DSRL round {curve[-1]['round']}")
     except Exception as err:  # training goes on; the next round uploads everything again
         print(f"upload to the Hub failed: {err}", flush=True)
+
+
+def scale_inputs(L, data):
+    """Fix the networks' input scaling from data's states (once per learner)."""
+    L["actor"].mean.copy_(data["o"].mean(0)), L["actor"].std.copy_(data["o"].std(0).clamp(min=1e-2))
+    x = torch.cat([data["o"], data["p"]], -1)
+    for c in (L["critic"], L["target"]):
+        c.mean.copy_(x.mean(0)), c.std.copy_(x.std(0).clamp(min=1e-2))
+    L["scaled"] = True
+
+
+def catch_up(L, update_fn, transitions_fn, scale_fn, dev):
+    """A fresh learner beside pours recorded by an earlier one: learn from all of them at once (critic only, then
+    critic and actor, UTD steps per replan each), and skip to the first round with no pours. Training and the logs then
+    start with the current actor's own pours. update_fn(L, data, steps, dev, actor?) as update()."""
+    old = sorted((OUT / "data").glob("*.npz"))
+    if L["round"] or not old:
+        return
+    data = transitions_fn(old)
+    scale_fn(L, data)
+    n = len(data["r"])
+    update_fn(L, data, UTD * n, dev, False)
+    loss, q, _ = update_fn(L, data, UTD * n, dev, True)
+    L["round"] = max(int(f.stem.split("-")[-1]) // 100 for f in old) + 1
+    for k in ("actor", "critic", "target"):
+        L[k].cpu()
+    print(f"caught up on {len(old)} recorded pours ({n} replans): critic loss {loss:.3f}, Q {q:.1f}; "
+          f"new pours start at round {L['round']}", flush=True)
 
 
 def train():
@@ -327,7 +357,8 @@ def train():
                config=dict(model=cheat.MODEL, rounds=ROUNDS, episodes=EPISODES, noise_steps=NOISE_STEPS,
                            directions=N_Z, z_max=Z_MAX, leash=LEASH, reward_scale=REWARD_SCALE, warmup=WARMUP,
                            gamma=GAMMA, utd=UTD, batch=BATCH, lr=LR, tau=TAU))
-    save(L)  # round 0's workers need an actor (fresh: noise about N(0, 1), like the plain policy)
+    catch_up(L, update, transitions, scale_inputs, dev)
+    save(L)  # the workers need an actor (fresh: noise about N(0, 1), like the plain policy)
     for rnd in range(L["round"], ROUNDS):
         units = [f"{p}-0-{rnd * 100 + i}" for i in range(EPISODES // len(ev.PLANTS)) for p in ev.PLANTS]
         ev.UNITS = units
@@ -338,11 +369,8 @@ def train():
             print(f"round {rnd}: no pour in this round (none carried?), next round")
             continue
         data = transitions(files)
-        if rnd == 0 or not L["curve"]:  # input scaling, fixed from the first round's states
-            L["actor"].mean.copy_(data["o"].mean(0)), L["actor"].std.copy_(data["o"].std(0).clamp(min=1e-2))
-            x = torch.cat([data["o"], data["p"]], -1)
-            for c in (L["critic"], L["target"]):
-                c.mean.copy_(x.mean(0)), c.std.copy_(x.std(0).clamp(min=1e-2))
+        if not (L.get("scaled") or L["curve"]):  # input scaling, fixed from the first round's states
+            scale_inputs(L, data)
         new = transitions(mine)
         t0 = time.time()
         loss, q, alpha = update(L, data, UTD * len(new["r"]), dev, actor=rnd >= WARMUP)

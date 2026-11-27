@@ -47,6 +47,9 @@
 #   ./run pour-judge  [--jobs 30]  the trained judge picks one of the K, no look-ahead -> results/pour-judge/
 #   ./run dsrl        [--jobs 9]   DSRL: SAC learns the noise SmolVLA pours from, in rounds of pour trials -> results/dsrl/
 #   ./run pour-dsrl   [--jobs 30]  the pour-only benchmark with the trained noise actor -> results/pour-dsrl/
+#   ./run rltoken-token            RL Token: the token encoder-decoder on SmolVLA's prefix (judge frames) -> token.pt + Hub
+#   ./run rltoken     [--jobs 18]  RL Token: online actor-critic refining SmolVLA's chunk, in rounds -> results/rltoken/
+#   ./run pour-rltoken [--jobs 30] the pour-only benchmark with the trained RL Token actor -> results/pour-rltoken/
 #   ./run distill     [--jobs 16]  control B: the cheat pours at spots 1-4, recorded -> dataset/data/cheat/
 #   ./run distill-export           the watered ones + dagger1's data -> Hub (then ./run train libero-4s-dart-full-xxl-sd-rel-b64-dagger1-cheat)
 #   ./run pour-distilled [--jobs 30]  the pour-only benchmark of that model -> results/pour-plain/<model>/
@@ -106,6 +109,9 @@ case "$cmd" in
   pour-random) OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 ARM=random PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions:smolvla-worldmodel MUJOCO_GL=$gl exec $py smolvla-worldmodel/pour.py "$@" ;;
   dsrl)        OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 ARM=dsrl PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions:smolvla-worldmodel MUJOCO_GL=$gl exec $py smolvla-worldmodel/dsrl.py "$@" ;;
   pour-dsrl)   DSRL=eval OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 ARM=dsrl PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions:smolvla-worldmodel MUJOCO_GL=$gl exec $py smolvla-worldmodel/dsrl.py "$@" ;;
+  rltoken-token) RLT=token OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 ARM=rltoken PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions:smolvla-worldmodel MUJOCO_GL=$gl exec $py smolvla-worldmodel/rltoken.py "$@" ;;
+  rltoken)     OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 ARM=rltoken PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions:smolvla-worldmodel MUJOCO_GL=$gl exec $py smolvla-worldmodel/rltoken.py "$@" ;;
+  pour-rltoken) RLT=eval OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 ARM=rltoken PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions:smolvla-worldmodel MUJOCO_GL=$gl exec $py smolvla-worldmodel/rltoken.py "$@" ;;
   judge-full) OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 ARM=random PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions:smolvla-worldmodel MUJOCO_GL=$gl exec $py smolvla-worldmodel/judge_full.py "$@" ;;
   judge-check) PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions:smolvla-worldmodel MUJOCO_GL=$gl exec $py smolvla-worldmodel/judge_check.py "$@" ;;
   judge-train) PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions:smolvla-worldmodel MUJOCO_GL=$gl exec $py smolvla-worldmodel/judge_train.py "$@" ;;
@@ -116,5 +122,5 @@ case "$cmd" in
   pour-distilled) OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 ARM=plain MODEL=libero-4s-dart-full-xxl-sd-rel-b64-dagger1-cheat PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions:smolvla-worldmodel MUJOCO_GL=$gl exec $py smolvla-worldmodel/pour.py "$@" ;;
   pour-film)   OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 ARM=plain PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions:smolvla-worldmodel MUJOCO_GL=$gl exec $py smolvla-worldmodel/film.py "$@" ;;
   *)         [ -f sim/tools/run ] && . sim/tools/run  # local-only commands, if present (gitignored)
-             sed -n '2,60p' "$0" | sed 's/^# //' ;;
+             sed -n '2,63p' "$0" | sed 's/^# //' ;;
 esac
