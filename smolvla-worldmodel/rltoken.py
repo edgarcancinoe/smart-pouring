@@ -19,6 +19,7 @@ shortcut: the token is trained on the judge recordings' frames, not on demos (th
 
 Usage: ./run rltoken-token              the token encoder-decoder -> token.pt (+ Hub)
        ./run rltoken [--jobs 18]        online RL -> results/rltoken/<model>/
+       RLT_RUN=<name> ./run rltoken     a separate run (same token): results/rltoken-<name>/<model>/, Hub worldmodel/rltoken-<name>/
        ./run pour-rltoken [--jobs 18]   the pour benchmark at spots 5-8 with the trained actor (no exploration)
 """
 import json
@@ -57,9 +58,11 @@ ROUNDS = 30
 C = ev.N_ACTION_STEPS   # actions the actor outputs (the ones run before the next replan)
 N_A = len(ev.OPEN)
 SCALE = np.r_[0.16, 0.22, 0.18, 0.11, 0.04, 0.05]  # spread (std) of SmolVLA's pour actions per dim (judge recordings), the gripper's out
-DELTA = 1.0             # the correction is at most DELTA x SCALE per action
+DELTA = 0.5             # the correction is at most DELTA x SCALE per action (1.0 let the first run's actor sit at the edge)
 SIGMA = 0.3             # exploration noise while training: SIGMA x SCALE
-BETA = 0.1              # actor loss + BETA x sum((a - ã) / SCALE)^2: stay near SmolVLA's chunk
+BETA = 2.0              # actor loss + BETA x sum((a - ã) / SCALE)^2: stay near SmolVLA's chunk (0.1 was ~3 vs Q ~100: no leash;
+                        # the first run's actor went to the edge, its critic over-rated it, its pours collapsed)
+TARGET_NOISE, TARGET_CLIP = 0.2, 0.5  # TD3 target smoothing, x SCALE: the critic's target averages over nearby chunks
 GAMMA = 0.95            # per replan
 UTD = 2                 # gradient steps per new transition (dsrl.py's 10 let its critic diverge)
 POLICY_EVERY = 2        # critic steps per actor step (TD3)
@@ -68,8 +71,10 @@ WARMUP = dsrl.WARMUP    # rounds of critic-only updates: the actor stays at Smol
 BATCH = 256
 LR = 3e-4
 TAU = 0.005
-OUT = cheat.RESULTS.parent / "rltoken" / MODEL
-HUB_DIR = f"worldmodel/rltoken/{MODEL}"
+RUN = os.environ.get("RLT_RUN", "")  # a run's name: its own folders here and on the Hub ("" = the first run's)
+TOKEN_DIR, TOKEN_HUB = cheat.RESULTS.parent / "rltoken" / MODEL, f"worldmodel/rltoken/{MODEL}/token.pt"  # one token for every run
+OUT = cheat.RESULTS.parent / f"rltoken{'-' + RUN if RUN else ''}" / MODEL
+HUB_DIR = f"worldmodel/rltoken{'-' + RUN if RUN else ''}/{MODEL}"
 N_OBS, N_PRIV = dsrl.N_OBS, dsrl.N_PRIV
 N_X = TOKEN_WIDTH + N_OBS
 N_REF = C * N_A
@@ -195,19 +200,20 @@ def train_token():
             wandb.log(row, step=step)
             print(f"token step {step}/{TOKEN_STEPS}: {row}", flush=True)
     OUT.mkdir(parents=True, exist_ok=True)
-    torch.save(dict(state=tok.cpu().state_dict(), width=tok.width, tokens=tok.tokens), OUT / "token.pt")
-    HfApi().upload_file(path_or_fileobj=OUT / "token.pt", path_in_repo=f"{HUB_DIR}/token.pt", repo_id=HUB, repo_type="dataset")
+    TOKEN_DIR.mkdir(parents=True, exist_ok=True)
+    torch.save(dict(state=tok.cpu().state_dict(), width=tok.width, tokens=tok.tokens), TOKEN_DIR / "token.pt")
+    HfApi().upload_file(path_or_fileobj=TOKEN_DIR / "token.pt", path_in_repo=TOKEN_HUB, repo_id=HUB, repo_type="dataset")
     wandb.finish()
-    print(f"-> {OUT / 'token.pt'} (+ Hub {HUB_DIR}/token.pt)")
+    print(f"-> {TOKEN_DIR / 'token.pt'} (+ Hub {TOKEN_HUB})")
 
 
 def token_model(device):
     """This process's frozen token encoder (OUT/token.pt, else the Hub's)."""
     if "token" not in _r:
-        path = OUT / "token.pt"
+        path = TOKEN_DIR / "token.pt"
         if not path.exists():
             from huggingface_hub import hf_hub_download
-            path = hf_hub_download(HUB, f"{HUB_DIR}/token.pt", repo_type="dataset")
+            path = hf_hub_download(HUB, TOKEN_HUB, repo_type="dataset")
         t = torch.load(path, weights_only=True)
         tok = Token(t["width"], t["tokens"])
         tok.load_state_dict(t["state"])
@@ -316,7 +322,9 @@ def update(L, data, steps, dev, train_actor=True):
     for step in range(steps):
         i = torch.randint(n, (BATCH,), device=dev)
         with torch.no_grad():
-            y = REWARD_SCALE * d["r"][i] + GAMMA * (1 - d["d"][i]) * torch.min(*t(d["x2"][i], d["p2"][i], a(d["x2"][i], d["ref2"][i])))
+            a2 = a(d["x2"][i], d["ref2"][i])
+            a2 = a2 + (TARGET_NOISE * torch.randn_like(a2)).clamp(-TARGET_CLIP, TARGET_CLIP) * STEER.to(a2)  # TD3 target smoothing
+            y = REWARD_SCALE * d["r"][i] + GAMMA * (1 - d["d"][i]) * torch.min(*t(d["x2"][i], d["p2"][i], a2))
         q1, q2 = c(d["x"][i], d["p"][i], d["a"][i])
         loss_c = F.mse_loss(q1, y) + F.mse_loss(q2, y)
         L["opt_c"].zero_grad()
@@ -378,7 +386,7 @@ def train():
     dev = runs.device()
     L = load()
     L["wandb_id"] = L.get("wandb_id") or f"rltoken-{int(time.time())}"  # kept in learner.pt: a resumed run continues the same W&B run
-    wb = dict(name=f"rltoken-{MODEL}", id=L["wandb_id"],
+    wb = dict(name=f"rltoken{'-' + RUN if RUN else ''}-{MODEL}", id=L["wandb_id"],
               config=dict(model=MODEL, rounds=ROUNDS, episodes=dsrl.EPISODES, delta=DELTA, sigma=SIGMA, beta=BETA,
                           gamma=GAMMA, utd=UTD, reward_scale=REWARD_SCALE, warmup=WARMUP, batch=BATCH, lr=LR, tau=TAU))
     wb = dsrl.wb_open(L["curve"], **wb)
