@@ -1,6 +1,8 @@
 """DSRL (Wagenmaker et al. 2025, "Steering Your Diffusion Policy with Latent Space RL"): online RL that leaves
 SmolVLA frozen and learns only the noise its chunk is denoised from. A small SAC actor maps what the policy knows (robot
-state, grasp memory, plant) to that noise; SmolVLA turns it into the chunk as usual. Only the pour is learned: the
+state, grasp memory, plant) to that noise; SmolVLA turns it into the chunk as usual. The actor steers only N_Z
+directions of the noise (directions()): the rest stays plain random noise, so a random actor is the plain policy and the
+critic learns from N_Z numbers instead of all NOISE_STEPS x 7. Only the pour is learned: the
 plain policy carries the mug (pour.py's trials), the actor picks the noise at every replan from then until the mug is
 empty. Reward per replan: drops newly in the target pot minus drops newly in a wrong pot or spilled.
 The critic also sees the sim (mug mouth vs pot, tilt, drops: cheat.state), the actor never does (asymmetric).
@@ -12,7 +14,7 @@ finished trials and continues from learner.pt.
 round); after every round all but the videos -> the Hub's worldmodel/dsrl/<model>/, and the round's numbers -> W&B
 (project WANDB_PROJECT; needs `uv run wandb login` once per machine)
 shortcut: the actor sees no camera (the pots don't move, the plant says which); add SigLIP features if it plateaus
-shortcut: the actor sets the noise of the chunk's first NOISE_STEPS actions (the ones run), the rest of the noise is 0
+shortcut: the directions are hand-picked (whole-chunk lean per action slot, tilt ramps); learn them if this plateaus
 shortcut: a trial that hangs stalls its round (as in pour-plain): stop and rerun, it resumes
 
 Usage: ./run dsrl [--jobs 9]        train -> results/dsrl/<model>/
@@ -38,14 +40,15 @@ from dataset.export_lerobot import CAMERAS
 from judge_check import HUB
 
 TRAIN = os.environ.get("DSRL") != "eval"  # ./run pour-dsrl sets DSRL=eval: the actor's mean noise, benchmark trials
-ROUNDS = 30
+ROUNDS = 40             # the first 12 replay the 70-number run's pours (its data, projected on the directions)
 EPISODES = 18           # pour trials per round (a third per plant)
-NOISE_STEPS = 10        # chunk steps whose noise the actor sets (= the N_ACTION_STEPS run)
-NOISE_MAX = 2.0         # the actor's noise is squashed to +- this (SmolVLA's noise is N(0, 1))
+NOISE_STEPS = 10        # chunk steps the directions span (= the N_ACTION_STEPS run)
+Z_MAX = 2.0             # the actor's push along each direction is squashed to +- this (plain noise: N(0, 1) along each)
+LEASH = 1.0             # actor loss + LEASH x |z|^2: stay near the noise SmolVLA was trained on (a drop is worth REWARD_SCALE)
 HIDDEN = 256
 GAMMA = 0.95            # per replan (0.5 s): about 10 s ahead
-UTD = 10                # gradient steps per new transition
-REWARD_SCALE = 10.0     # reward x this in the critic: else SAC's entropy bonus over N_W noise numbers dwarfs a few drops
+UTD = 2                 # gradient steps per new transition (10 let the critic diverge: Q ~400 vs returns ~14)
+REWARD_SCALE = 10.0     # reward x this in the critic: else SAC's entropy bonus dwarfs a few drops
 WARMUP = 3              # rounds whose updates train only the critic: the actor stays random until the critic has data
 BATCH = 256
 LR = 3e-4
@@ -57,9 +60,30 @@ KEEP_OUT = 4.0          # cm from spots 5-8
 OUT = cheat.RESULTS.parent / "dsrl" / cheat.MODEL
 ACTOR = OUT / "actor.pt"
 N_A = len(ev.OPEN)      # action dims (7)
-N_W = NOISE_STEPS * N_A
+N_W = NOISE_STEPS * N_A  # noise numbers of the steps run
 N_OBS = 8 + 3 + len(ev.PLANTS)  # state, grasp memory, plant
 N_PRIV = 9              # priv()
+
+def directions():
+    """The noise patterns the actor steers, (N_W, N_Z) orthonormal columns over the (NOISE_STEPS, 7) noise grid: per
+    action slot the same push on every step (lean the chunk in x, y, z, roll, pitch, yaw, gripper), and per rotation a
+    ramp over the steps (less early, more late: when to tilt)."""
+    cols = []
+    for d in range(N_A):
+        v = np.zeros((NOISE_STEPS, N_A))
+        v[:, d] = 1
+        cols.append(v.ravel())
+    for d in (3, 4, 5):  # the rotation slots (action: xyz, rotation, gripper)
+        v = np.zeros((NOISE_STEPS, N_A))
+        v[:, d] = np.linspace(-1, 1, NOISE_STEPS)
+        cols.append(v.ravel())
+    b = np.stack(cols, 1)
+    return torch.from_numpy(b / np.linalg.norm(b, axis=0)).float()
+
+
+B = directions()
+N_Z = B.shape[1]
+assert torch.allclose(B.T @ B, torch.eye(N_Z), atol=1e-6), "directions must be orthonormal"
 
 _w = {}  # this process: the actor (and its file's mtime), the running trial's unit and replans
 
@@ -82,36 +106,37 @@ def mlp(n_in, n_out):
 
 
 class Actor(nn.Module):
-    """obs -> noise (N_W,), tanh-squashed Gaussian; explore=False: its mean."""
+    """obs -> push z along each direction (N_Z,), tanh-squashed Gaussian; explore=False: its mean."""
 
     def __init__(self):
         super().__init__()
         self.register_buffer("mean", torch.zeros(N_OBS))
         self.register_buffer("std", torch.ones(N_OBS))
-        self.net = mlp(N_OBS, 2 * N_W)
+        self.net = mlp(N_OBS, 2 * N_Z)
+        nn.init.zeros_(self.net[-1].weight), nn.init.zeros_(self.net[-1].bias)  # fresh: z ~ tanh(N(0, 1)) x Z_MAX for every state, about the plain policy
 
     def forward(self, o, explore=True):
         mu, log_std = self.net((o - self.mean) / self.std).chunk(2, -1)
         if not explore:
-            return torch.tanh(mu) * NOISE_MAX, None
+            return torch.tanh(mu) * Z_MAX, None
         log_std = log_std.clamp(-5, 1)
         u = mu + log_std.exp() * torch.randn_like(mu)
         logp = (-0.5 * ((u - mu) / log_std.exp()) ** 2 - log_std - 0.5 * np.log(2 * np.pi)).sum(-1)
         logp = logp - (2 * (np.log(2) - u - F.softplus(-2 * u))).sum(-1)  # the tanh's change of density
-        return torch.tanh(u) * NOISE_MAX, logp
+        return torch.tanh(u) * Z_MAX, logp
 
 
 class Critic(nn.Module):
-    """(obs, priv, noise) -> two Q estimates."""
+    """(obs, priv, z) -> two Q estimates."""
 
     def __init__(self):
         super().__init__()
         self.register_buffer("mean", torch.zeros(N_OBS + N_PRIV))
         self.register_buffer("std", torch.ones(N_OBS + N_PRIV))
-        self.q1, self.q2 = mlp(N_OBS + N_PRIV + N_W, 1), mlp(N_OBS + N_PRIV + N_W, 1)
+        self.q1, self.q2 = mlp(N_OBS + N_PRIV + N_Z, 1), mlp(N_OBS + N_PRIV + N_Z, 1)
 
-    def forward(self, o, p, w):
-        x = torch.cat([(torch.cat([o, p], -1) - self.mean) / self.std, w / NOISE_MAX], -1)
+    def forward(self, o, p, z):
+        x = torch.cat([(torch.cat([o, p], -1) - self.mean) / self.std, z / Z_MAX], -1)
         return self.q1(x)[:, 0], self.q2(x)[:, 0]
 
 
@@ -130,18 +155,21 @@ def actor():
 
 
 def pick(model, frame, task, s):
-    """cheat's noise_policy: the chunk SmolVLA denoises from the actor's noise; the replan is recorded."""
+    """cheat's noise_policy: the chunk SmolVLA denoises from plain random noise with the actor's push along the
+    directions (w = B z + the noise's part off the directions); the replan and its noise w are recorded."""
     o = obs(frame, task)
     with torch.no_grad():
-        w = actor()(torch.from_numpy(o)[None], explore=TRAIN)[0][0]
+        z = actor()(torch.from_numpy(o)[None], explore=TRAIN)[0][0]
+    policy, pre, post = model
+    cfg = policy.config
+    noise = torch.randn(1, cfg.chunk_size, cfg.max_action_dim)  # plain policy's noise everywhere...
+    eps = noise[0, :NOISE_STEPS, :N_A].reshape(-1)
+    w = B @ z + eps - B @ (B.T @ eps)  # ...but along the directions: the actor's z
+    noise[0, :NOISE_STEPS, :N_A] = w.view(NOISE_STEPS, N_A)
     e = cheat._run["env"].env
     st = e.watering_stats()
     _w["steps"].append(dict(obs=o, priv=priv(s), w=w.numpy(), good=st["target"],
                             bad=st["spilled"] + sum(st[p] for p in e.pot_names if p != e.target_pot)))
-    policy, pre, post = model
-    cfg = policy.config
-    noise = torch.zeros(1, cfg.chunk_size, cfg.max_action_dim)
-    noise[0, :NOISE_STEPS, :N_A] = w.view(NOISE_STEPS, N_A)
     batch = {key: torch.from_numpy(frame[key]).permute(2, 0, 1).float().div(255)[None] for key in CAMERAS}
     batch["observation.state"] = torch.from_numpy(frame["observation.state"])[None]
     batch["task"] = [task]
@@ -182,13 +210,14 @@ def run_unit(unit, *args, **kwargs):
 
 
 def transitions(files):
-    """npz files -> tensors obs, priv, noise, reward, next obs, next priv, done (one row per replan)."""
-    cols = {k: [] for k in ("o", "p", "w", "r", "o2", "p2", "d")}
+    """npz files -> tensors obs, priv, z (the recorded noise along the directions), reward, next obs, next priv, done
+    (one row per replan)."""
+    cols = {k: [] for k in ("o", "p", "z", "r", "o2", "p2", "d")}
     for f in files:
         z = np.load(f)
         good, bad = np.r_[z["good"], z["end_good"]], np.r_[z["bad"], z["end_bad"]]
         n = len(z["w"])
-        cols["o"].append(z["obs"]), cols["p"].append(z["priv"]), cols["w"].append(z["w"])
+        cols["o"].append(z["obs"]), cols["p"].append(z["priv"]), cols["z"].append(z["w"] @ B.numpy())
         cols["r"].append(np.diff(good) - np.diff(bad))
         cols["o2"].append(np.r_[z["obs"][1:], z["obs"][-1:]]), cols["p2"].append(np.r_[z["priv"][1:], z["priv"][-1:]])
         cols["d"].append(np.arange(n) == n - 1)
@@ -216,22 +245,22 @@ def update(L, data, steps, dev, actor=True):
         i = torch.randint(n, (BATCH,), device=dev)
         alpha = log_alpha.exp().item()
         with torch.no_grad():
-            w2, logp2 = a(d["o2"][i])
-            y = REWARD_SCALE * d["r"][i] + GAMMA * (1 - d["d"][i]) * (torch.min(*t(d["o2"][i], d["p2"][i], w2)) - alpha * logp2)
-        q1, q2 = c(d["o"][i], d["p"][i], d["w"][i])
+            z2, logp2 = a(d["o2"][i])
+            y = REWARD_SCALE * d["r"][i] + GAMMA * (1 - d["d"][i]) * (torch.min(*t(d["o2"][i], d["p2"][i], z2)) - alpha * logp2)
+        q1, q2 = c(d["o"][i], d["p"][i], d["z"][i])
         loss_c = F.mse_loss(q1, y) + F.mse_loss(q2, y)
         L["opt_c"].zero_grad()
         loss_c.backward()
         L["opt_c"].step()
-        w, logp = a(d["o"][i])
-        q = torch.min(*c(d["o"][i], d["p"][i], w))
+        z, logp = a(d["o"][i])
+        q = torch.min(*c(d["o"][i], d["p"][i], z))
         if not actor:
             continue
-        loss_a = (alpha * logp - q).mean()
+        loss_a = (alpha * logp - q + LEASH * (z ** 2).sum(-1)).mean()
         L["opt_a"].zero_grad()
         loss_a.backward()
         L["opt_a"].step()
-        loss_alpha = -(log_alpha * (logp.detach().cpu() - N_W).mean())  # target entropy -N_W
+        loss_alpha = -(log_alpha * (logp.detach().cpu() - N_Z).mean())  # target entropy -N_Z
         L["opt_alpha"].zero_grad()
         loss_alpha.backward()
         L["opt_alpha"].step()
@@ -294,9 +323,10 @@ def train():
     L = load()
     import wandb
     L["wandb_id"] = L.get("wandb_id") or f"dsrl-{int(time.time())}"  # kept in learner.pt: a resumed run continues the same W&B run
-    wandb.init(project=WANDB_PROJECT, name=f"dsrl-{cheat.MODEL}", id=L["wandb_id"], resume="allow",
+    wandb.init(project=WANDB_PROJECT, name=f"dsrl-dirs{N_Z}-{cheat.MODEL}", id=L["wandb_id"], resume="allow",
                config=dict(model=cheat.MODEL, rounds=ROUNDS, episodes=EPISODES, noise_steps=NOISE_STEPS,
-                           noise_max=NOISE_MAX, gamma=GAMMA, utd=UTD, batch=BATCH, lr=LR, tau=TAU))
+                           directions=N_Z, z_max=Z_MAX, leash=LEASH, reward_scale=REWARD_SCALE, warmup=WARMUP,
+                           gamma=GAMMA, utd=UTD, batch=BATCH, lr=LR, tau=TAU))
     save(L)  # round 0's workers need an actor (fresh: noise about N(0, 1), like the plain policy)
     for rnd in range(L["round"], ROUNDS):
         units = [f"{p}-0-{rnd * 100 + i}" for i in range(EPISODES // len(ev.PLANTS)) for p in ev.PLANTS]
