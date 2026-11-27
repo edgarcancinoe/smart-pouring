@@ -20,6 +20,11 @@ shortcut: a trial that hangs stalls its round (as in pour-plain): stop and rerun
 
 Usage: ./run dsrl [--jobs 9]        train -> results/dsrl/<model>/
        ./run pour-dsrl [--jobs 9]   the pour benchmark at spots 5-8 with the trained actor (its mean noise) -> results/pour-dsrl/
+       SAMPLE=1 ./run pour-dsrl ...  the same with sampled pushes (as in training), not the actor's mean
+       ./run starts-plain | starts-dsrl [--jobs 18]  training-style random mug starts with new seeds, nothing trained:
+                                    plain vs the actor (SAMPLE=1: sampled pushes) -> results/starts-<arm>[-sampled]/
+       ./run full-dsrl [--jobs 18]  the whole task (grasp, the actor's pour, put back) as the README headline: spots 1-8,
+                                    5 trials per plant x spot, 3 seed sets, 90 s -> results/full-dsrl/[s<seed>/]<model>/
 """
 import json
 import os
@@ -40,7 +45,25 @@ import runs
 from dataset.export_lerobot import CAMERAS
 from judge_check import HUB
 
-TRAIN = os.environ.get("DSRL") != "eval"  # ./run pour-dsrl sets DSRL=eval: the actor's mean noise, benchmark trials
+TRAIN = os.environ.get("DSRL") not in ("eval", "full", "starts")  # pour-dsrl: DSRL=eval, full-dsrl: full, starts-*: starts
+FULL = os.environ.get("DSRL") == "full"
+STARTS = os.environ.get("DSRL") == "starts"
+SAMPLE = os.environ.get("SAMPLE") == "1"  # outside training: sampled pushes as in training (default: the actor's mean)
+STARTS_SEED = 70_000    # starts-*' trial seeds: none of training's (40_000 + 10_000 x plant + t < 65_000)
+STARTS_TRIALS = 24      # starts-* trials per plant
+FULL_SEEDS = (0, 10_000, 20_000)  # evaluate.SEED of the headline's 3 seed sets (README: 3 seeds x 120 trials)
+
+
+def full_results(seed):
+    """full-dsrl's folder for a seed set, laid out as evaluate's (seed 0: no subfolder)."""
+    return pour.RESULTS_ROOT / "full-dsrl" / ("" if seed == 0 else f"s{seed}")
+
+
+if FULL:  # whole episodes: pour.py's end-of-pour rules off; its carried() stays the actor's gate, as in training
+    ev.act, ev.reset, cheat.trial = cheat.act, pour._reset, pour._trial
+    ev.HIT = "success"
+    ev.UNITS = [f"{p}-{s}-{t}" for p in ev.PLANTS for s in range(1, 9) for t in range(pour.TRIALS)]
+    cheat.RESULTS = ev.RESULTS = full_results(ev.SEED)
 ROUNDS = 40             # the first 12 replay the 70-number run's pours (its data, projected on the directions)
 EPISODES = 18           # pour trials per round (a third per plant)
 NOISE_STEPS = 10        # chunk steps the directions span (= the N_ACTION_STEPS run)
@@ -161,7 +184,7 @@ def pick(model, frame, task, s):
     directions (w = B z + the noise's part off the directions); the replan and its noise w are recorded."""
     o = obs(frame, task)
     with torch.no_grad():
-        z = actor()(torch.from_numpy(o)[None], explore=TRAIN)[0][0]
+        z = actor()(torch.from_numpy(o)[None], explore=TRAIN or SAMPLE)[0][0]
     policy, pre, post = model
     cfg = policy.config
     noise = torch.randn(1, cfg.chunk_size, cfg.max_action_dim)  # plain policy's noise everywhere...
@@ -238,7 +261,8 @@ def new_learner():
 
 def update(L, data, steps, dev, actor=True):
     """steps SAC gradient steps on data (transitions()); actor=False: the critic only (WARMUP).
-    Returns the last critic loss, the critic's Q of the actor's noise and alpha."""
+    Returns the last batch's critic loss, the critic's Q of the actor's noise, alpha, the actor's mean push |z| and,
+    if it trained, its loss."""
     a, c, t = L["actor"].to(dev), L["critic"].to(dev), L["target"].to(dev)
     log_alpha = L["log_alpha"]
     d = {k: v.to(dev) for k, v in data.items()}
@@ -254,10 +278,13 @@ def update(L, data, steps, dev, actor=True):
         L["opt_c"].zero_grad()
         loss_c.backward()
         L["opt_c"].step()
-        z, logp = a(d["o"][i])
-        q = torch.min(*c(d["o"][i], d["p"][i], z))
+        with torch.no_grad():  # before the actor: the target must follow the critic in the warm-up too
+            for pt, pc in zip(t.parameters(), c.parameters()):
+                pt.lerp_(pc, TAU)
         if not actor:
             continue
+        z, logp = a(d["o"][i])
+        q = torch.min(*c(d["o"][i], d["p"][i], z))
         loss_a = (alpha * logp - q + LEASH * (z ** 2).sum(-1)).mean()
         L["opt_a"].zero_grad()
         loss_a.backward()
@@ -266,10 +293,13 @@ def update(L, data, steps, dev, actor=True):
         L["opt_alpha"].zero_grad()
         loss_alpha.backward()
         L["opt_alpha"].step()
-        with torch.no_grad():
-            for pt, pc in zip(t.parameters(), c.parameters()):
-                pt.lerp_(pc, TAU)
-    return loss_c.item(), q.mean().item(), log_alpha.exp().item()
+    with torch.no_grad():
+        z, _ = a(d["o"][i])
+        q = torch.min(*c(d["o"][i], d["p"][i], z))
+    out = dict(critic_loss=loss_c.item(), q=q.mean().item(), alpha=log_alpha.exp().item(), push=z.abs().mean().item())
+    if actor:
+        out["actor_loss"] = loss_a.item()
+    return out
 
 
 def save(L):
@@ -338,11 +368,11 @@ def catch_up(L, update_fn, transitions_fn, scale_fn, dev):
     scale_fn(L, data)
     n = len(data["r"])
     update_fn(L, data, UTD * n, dev, False)
-    loss, q, _ = update_fn(L, data, UTD * n, dev, True)
+    s = update_fn(L, data, UTD * n, dev, True)
     L["round"] = max(int(f.stem.split("-")[-1]) // 100 for f in old) + 1
     for k in ("actor", "critic", "target"):
         L[k].cpu()
-    print(f"caught up on {len(old)} recorded pours ({n} replans): critic loss {loss:.3f}, Q {q:.1f}; "
+    print(f"caught up on {len(old)} recorded pours ({n} replans): critic loss {s['critic_loss']:.3f}, Q {s['q']:.1f}; "
           f"new pours start at round {L['round']}", flush=True)
 
 
@@ -373,13 +403,13 @@ def train():
             scale_inputs(L, data)
         new = transitions(mine)
         t0 = time.time()
-        loss, q, alpha = update(L, data, UTD * len(new["r"]), dev, actor=rnd >= WARMUP)
+        stats = update(L, data, UTD * len(new["r"]), dev, actor=rnd >= WARMUP)
         ends = [np.load(f) for f in mine]
         row = dict(round=rnd, episodes=len(mine), replans=len(new["r"]), all_replans=len(data["r"]),
                    drops=round(float(np.mean([z["end_good"] for z in ends])), 2),
                    watered=round(float(np.mean([z["watered"] for z in ends])), 2),
-                   reward=round(float(new["r"].sum()) / len(mine), 2), critic_loss=round(loss, 3), q=round(q, 2),
-                   alpha=round(alpha, 4), update_s=round(time.time() - t0))
+                   reward=round(float(new["r"].sum()) / len(mine), 2), **{k: round(v, 4) for k, v in stats.items()},
+                   update_s=round(time.time() - t0))
         L["curve"].append(row)
         L["round"] = rnd + 1
         for k in ("actor", "critic", "target"):
@@ -399,6 +429,21 @@ if TRAIN:
     ev.reset = reset
     ev.trial_seed = lambda plant, spot, t: SEED + 10_000 * ev.PLANTS.index(plant) + t
     cheat.RESULTS = ev.RESULTS = OUT.parent
+if STARTS:  # random starts drawn as in training, new seeds; nothing is trained or saved beyond the trial results
+    ev.reset = reset
+    ev.trial_seed = lambda plant, spot, t: STARTS_SEED + 10_000 * ev.PLANTS.index(plant) + t
+    ev.UNITS = [f"{p}-0-{t}" for t in range(STARTS_TRIALS) for p in ev.PLANTS]
+    cheat.RESULTS = ev.RESULTS = pour.RESULTS_ROOT / f"starts-{cheat.ARM}{'-sampled' if SAMPLE and cheat.ARM == 'dsrl' else ''}"
+
+
+def full():
+    """The whole task at every spot for each of the headline's seed sets, the actor pouring with its mean noise."""
+    for seed in FULL_SEEDS:
+        os.environ["SEED"] = str(seed)  # the spawned workers' evaluate reads it: their trial seeds and folder
+        ev.SEED = seed
+        cheat.RESULTS = ev.RESULTS = full_results(seed)
+        ev.main()
+
 
 if __name__ == "__main__":
-    train() if TRAIN else ev.main()
+    train() if TRAIN else full() if FULL else ev.main()

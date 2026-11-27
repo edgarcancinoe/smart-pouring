@@ -308,7 +308,8 @@ def new_learner():
 
 def update(L, data, steps, dev, train_actor=True):
     """steps TD3-style gradient steps on data (transitions()); train_actor=False: the critic only (WARMUP).
-    Returns the last critic loss, the critic's Q of the actor's chunk and how far that chunk is from SmolVLA's (in SCALEs)."""
+    Returns the last batch's critic loss, the critic's Q of the actor's chunk, how far that chunk is from SmolVLA's (in
+    SCALEs) and, if it trained, the actor's loss."""
     a, c, t = L["actor"].to(dev), L["critic"].to(dev), L["target"].to(dev)
     d = {k: v.to(dev) for k, v in data.items()}
     n, norm = len(d["r"]), NORM.to(dev)
@@ -335,7 +336,10 @@ def update(L, data, steps, dev, train_actor=True):
         act = a(d["x"][i], d["ref"][i])
         q = torch.min(*c(d["x"][i], d["p"][i], act)).mean().item()
         off = (((act - d["ref"][i]) / norm) ** 2).sum(-1).sqrt().mean().item()
-    return loss_c.item(), q, off
+    out = dict(critic_loss=loss_c.item(), q=q, off_smolvla=off)
+    if train_actor:  # its first step always trains the actor (step 0)
+        out["actor_loss"] = loss_a.item()
+    return out
 
 
 def save(L):
@@ -394,13 +398,13 @@ def train():
             scale_inputs(L, data)
         new = transitions(mine)
         t0 = time.time()
-        loss, q, off = update(L, data, UTD * len(new["r"]), dev, train_actor=rnd >= WARMUP)
+        stats = update(L, data, UTD * len(new["r"]), dev, train_actor=rnd >= WARMUP)
         ends = [np.load(f) for f in mine]
         row = dict(round=rnd, episodes=len(mine), replans=len(new["r"]), all_replans=len(data["r"]),
                    drops=round(float(np.mean([z["end_good"] for z in ends])), 2),
                    watered=round(float(np.mean([z["watered"] for z in ends])), 2),
-                   reward=round(float(new["r"].sum()) / len(mine), 2), critic_loss=round(loss, 3), q=round(q, 2),
-                   off_smolvla=round(off, 3), update_s=round(time.time() - t0))
+                   reward=round(float(new["r"].sum()) / len(mine), 2), **{k: round(v, 4) for k, v in stats.items()},
+                   update_s=round(time.time() - t0))
         L["curve"].append(row)
         L["round"] = rnd + 1
         for k in ("actor", "critic", "target"):
