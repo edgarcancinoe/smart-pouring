@@ -403,17 +403,28 @@ def held_out(tag, arm):
                 drops=round(sum(x["in_target"] for x in c) / max(len(c), 1), 2))
 
 
+def wb_log(rows, **init):
+    """rows (dicts with "round") -> the W&B run init names, opened only for this. A run kept open while evaluate.main
+    forks its helper process stopped recording metrics: the console kept streaming, the logged rows never arrived."""
+    import wandb
+    run = wandb.init(project=WANDB_PROJECT, resume="allow", **init)
+    for r in rows:
+        run.log(r, step=r["round"])
+    run.finish()
+
+
 def train():
     """ROUNDS x (EPISODES pour trials with the current actor, then UTD SAC steps per new replan)."""
     OUT.mkdir(parents=True, exist_ok=True)
     dev = runs.device()
     L = load()
-    import wandb
     L["wandb_id"] = L.get("wandb_id") or f"dsrl-{int(time.time())}"  # kept in learner.pt: a resumed run continues the same W&B run
-    wandb.init(project=WANDB_PROJECT, name=f"dsrl-{RUN or 'dirs' + str(N_Z)}-{cheat.MODEL}", id=L["wandb_id"], resume="allow",
-               config=dict(model=cheat.MODEL, rounds=ROUNDS, episodes=EPISODES, noise_steps=NOISE_STEPS,
-                           directions=N_Z, z_max=Z_MAX, leash=LEASH, reward_scale=REWARD_SCALE, warmup=WARMUP,
-                           gamma=GAMMA, utd=UTD, batch=BATCH, lr=LR, tau=TAU))
+    wb = dict(name=f"dsrl-{RUN or 'dirs' + str(N_Z)}-{cheat.MODEL}", id=L["wandb_id"],
+              config=dict(model=cheat.MODEL, rounds=ROUNDS, episodes=EPISODES, noise_steps=NOISE_STEPS,
+                          directions=N_Z, z_max=Z_MAX, leash=LEASH, reward_scale=REWARD_SCALE, warmup=WARMUP,
+                          gamma=GAMMA, utd=UTD, batch=BATCH, lr=LR, tau=TAU))
+    if L["curve"]:
+        wb_log(L["curve"], **wb)  # a restart: the rounds so far (W&B drops any it already has)
     catch_up(L, update, transitions, scale_inputs, dev)
     save(L)  # the workers need an actor (fresh: noise about N(0, 1), like the plain policy)
     for rnd in range(L["round"], ROUNDS):
@@ -447,9 +458,8 @@ def train():
         L["curve"].append(row)
         save(L)
         report(L["curve"])
-        wandb.log(row, step=rnd)
+        wb_log([row], **wb)
         print(f"\n=== DSRL round {rnd}: {row}\n", flush=True)
-    wandb.finish()
 
 
 _reset, _trial, _run_unit = ev.reset, cheat.trial, ev.run_unit
