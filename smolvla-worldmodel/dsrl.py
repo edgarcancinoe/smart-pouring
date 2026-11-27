@@ -288,7 +288,7 @@ def train():
     dev = runs.device()
     L = load()
     import wandb
-    L["wandb_id"] = L.get("wandb_id") or wandb.util.generate_id()  # kept in learner.pt: a resumed run continues the same W&B run
+    L["wandb_id"] = L.get("wandb_id") or f"dsrl-{int(time.time())}"  # kept in learner.pt: a resumed run continues the same W&B run
     wandb.init(project=WANDB_PROJECT, name=f"dsrl-{cheat.MODEL}", id=L["wandb_id"], resume="allow",
                config=dict(model=cheat.MODEL, rounds=ROUNDS, episodes=EPISODES, noise_steps=NOISE_STEPS,
                            noise_max=NOISE_MAX, gamma=GAMMA, utd=UTD, batch=BATCH, lr=LR, tau=TAU))
