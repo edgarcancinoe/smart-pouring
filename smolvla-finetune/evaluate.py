@@ -311,7 +311,8 @@ def main():
         print(f"not on the Hub yet (skipped): {', '.join(missing)}")
     out = RESULTS / f"grasp-n{N_ACTION_STEPS}" if args.grasp else RESULTS
     label = "lifted" if args.grasp else "succeeded" if HIT == "success" else HIT
-    manager = multiprocessing.Manager()  # the workers' shared trial tally
+    manager = multiprocessing.get_context("forkserver").Manager()  # the workers' shared trial tally; not forked from
+    # this process: a fork of it (threads, an open W&B run in dsrl.py) can deadlock or end that run
     for name in models:
         todo = [u for u in UNITS if not (out / name / f"{u}.json").exists()]
         print(f"\n=== {name}: {len(todo)} of {len(UNITS)} units to run, {TRIALS} trials each", flush=True)

@@ -47,6 +47,7 @@
 #   ./run pour-judge  [--jobs 30]  the trained judge picks one of the K, no look-ahead -> results/pour-judge/
 #   ./run dsrl        [--jobs 9]   DSRL: SAC learns the noise SmolVLA pours from, in rounds of pour trials -> results/dsrl/
 #   ./run pour-dsrl   [--jobs 30]  the pour-only benchmark with the trained noise actor -> results/pour-dsrl/
+#   ./run eval-dsrl   [--jobs 9]   all DSRL evals (spots 5-8 x 3 seed sets, spots 1-4, 72 random starts); DSRL_RUN=<run> picks the run
 #   ./run upload-results           every results folder -> the Hub's worldmodel/<same name>/, only what changed (not old/, not dsrl*/: training uploads itself)
 #   ./run full-dsrl   [--jobs 18]  the whole task with the trained noise actor, as the README headline (3 seeds x 120, 90 s) -> results/full-dsrl/
 #   ./run starts-plain | starts-dsrl [--jobs 18]  plain vs the DSRL actor on training-style random starts, new seeds (SAMPLE=1: sampled pushes)
@@ -113,6 +114,7 @@ case "$cmd" in
   pour-random) OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 ARM=random PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions:smolvla-worldmodel MUJOCO_GL=$gl exec $py smolvla-worldmodel/pour.py "$@" ;;
   dsrl)        OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 ARM=dsrl PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions:smolvla-worldmodel MUJOCO_GL=$gl exec $py smolvla-worldmodel/dsrl.py "$@" ;;
   pour-dsrl)   DSRL=eval OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 ARM=dsrl PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions:smolvla-worldmodel MUJOCO_GL=$gl exec $py smolvla-worldmodel/dsrl.py "$@" ;;
+  eval-dsrl)   for v in SEED=0 SEED=10000 SEED=20000 SPOTS=1,2,3,4 DSRL=starts; do echo "=== eval-dsrl: $v"; env DSRL=eval $v OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 ARM=dsrl PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions:smolvla-worldmodel MUJOCO_GL=$gl $py smolvla-worldmodel/dsrl.py "$@" || exit 1; done ;;
   upload-results) for d in smolvla-worldmodel/results/*/; do n=$(basename "$d"); case $n in old|dsrl|dsrl-*) continue;; esac; echo "== $n -> worldmodel/$n"; .venv/bin/hf upload edgarcancinoe/smolvla_water_results "$d" "worldmodel/$n" --repo-type dataset || exit 1; done ;;  # unchanged files are skipped
   full-dsrl)   DSRL=full MAX_STEPS=${MAX_STEPS:-1800} OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 ARM=dsrl PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions:smolvla-worldmodel MUJOCO_GL=$gl exec $py smolvla-worldmodel/dsrl.py "$@" ;;
   starts-dsrl) DSRL=starts OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 ARM=dsrl PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions:smolvla-worldmodel MUJOCO_GL=$gl exec $py smolvla-worldmodel/dsrl.py "$@" ;;
@@ -131,5 +133,5 @@ case "$cmd" in
   pour-distilled) OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 ARM=plain MODEL=libero-4s-dart-full-xxl-sd-rel-b64-dagger1-cheat PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions:smolvla-worldmodel MUJOCO_GL=$gl exec $py smolvla-worldmodel/pour.py "$@" ;;
   pour-film)   OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 ARM=plain PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions:smolvla-worldmodel MUJOCO_GL=$gl exec $py smolvla-worldmodel/film.py "$@" ;;
   *)         [ -f sim/tools/run ] && . sim/tools/run  # local-only commands, if present (gitignored)
-             sed -n '2,67p' "$0" | sed 's/^# //' ;;
+             sed -n '2,68p' "$0" | sed 's/^# //' ;;
 esac

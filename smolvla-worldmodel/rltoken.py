@@ -381,8 +381,7 @@ def train():
     wb = dict(name=f"rltoken-{MODEL}", id=L["wandb_id"],
               config=dict(model=MODEL, rounds=ROUNDS, episodes=dsrl.EPISODES, delta=DELTA, sigma=SIGMA, beta=BETA,
                           gamma=GAMMA, utd=UTD, reward_scale=REWARD_SCALE, warmup=WARMUP, batch=BATCH, lr=LR, tau=TAU))
-    if L["curve"]:
-        dsrl.wb_log(L["curve"], **wb)  # a restart: the rounds so far
+    wb = dsrl.wb_open(L["curve"], **wb)
     dsrl.catch_up(L, update, transitions, scale_inputs, dev)  # a fresh learner beside recorded pours: learn from them first
     save(L)  # the workers need an actor (fresh: SmolVLA's chunk, plus exploration noise)
     for rnd in range(L["round"], ROUNDS):
@@ -412,8 +411,9 @@ def train():
             L[k].cpu()
         save(L)
         dsrl.report(L["curve"])
-        dsrl.wb_log([row], **wb)  # opened per round: see dsrl.wb_log
+        wb.log(row, step=rnd)
         print(f"\n=== RL token round {rnd}: {row}\n", flush=True)
+    wb.finish()
 
 
 # at import, so the spawned eval workers get them too: dsrl.py's trial machinery, this file's actor and folders

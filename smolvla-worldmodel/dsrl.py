@@ -30,6 +30,9 @@ Usage: ./run dsrl [--jobs 9]        train -> results/dsrl/<model>/
                                     plain vs the actor (SAMPLE=1: sampled pushes) -> results/starts-<arm>[-sampled]/
        ./run replay-plain [--jobs 9]  the plain policy on the exact trials of the first run's rounds REPLAY_ROUNDS
                                     -> results/replay-plain/ (were those starts easy, or was the actor better?)
+       [DSRL_RUN=<run>] ./run eval-dsrl [--jobs 9]  every DSRL evaluation with a plain counterpart, old rules, mean push:
+                                    pour benchmark at spots 5-8 (seed sets 0, 10000, 20000) and 1-4, 72 training-style starts
+                                    -> results/pour-dsrl-<run>[-s<seed>|-spots1234]/, starts-dsrl-<run>/
        ./run full-dsrl [--jobs 18]  the whole task (grasp, the actor's pour, put back) as the README headline: spots 1-8,
                                     5 trials per plant x spot, 3 seed sets, 90 s -> results/full-dsrl/[s<seed>/]<model>/
 """
@@ -74,7 +77,7 @@ if FULL:  # whole episodes: pour.py's end-of-pour rules off; its carried() stays
     ev.HIT = "success"
     ev.UNITS = [f"{p}-{s}-{t}" for p in ev.PLANTS for s in range(1, 9) for t in range(pour.TRIALS)]
     cheat.RESULTS = ev.RESULTS = full_results(ev.SEED)
-ROUNDS = 30
+ROUNDS = int(os.environ.get("DSRL_ROUNDS", 30))  # a finished run continues to more rounds when rerun with a higher one
 EPISODES = 18           # pour trials per round (a third per plant)
 NOISE_STEPS = 10        # chunk steps the directions span (= the N_ACTION_STEPS run)
 Z_MAX = 2.0             # the actor's push along each direction is squashed to +- this (plain noise: N(0, 1) along each)
@@ -407,14 +410,16 @@ def held_out(tag, arm):
                 drops=round(sum(x["in_target"] for x in c) / max(len(c), 1), 2))
 
 
-def wb_log(rows, **init):
-    """rows (dicts with "round") -> the W&B run init names, opened only for this. A run kept open while evaluate.main
-    forks its helper process stopped recording metrics: the console kept streaming, the logged rows never arrived."""
+def wb_open(rows, **init):
+    """The W&B run (init: name, id, config), open for the whole training; on a restart it first gets the rounds in rows
+    (dicts with "round") it doesn't have yet. evaluate.main no longer forks this process, which had stopped the run
+    recording (the console kept streaming, the logged rows never arrived)."""
     import wandb
     run = wandb.init(project=WANDB_PROJECT, resume="allow", **init)
     for r in rows:
-        run.log(r, step=r["round"])
-    run.finish()
+        if r["round"] >= run.step:
+            run.log(r, step=r["round"])
+    return run
 
 
 def train():
@@ -427,8 +432,7 @@ def train():
               config=dict(model=cheat.MODEL, rounds=ROUNDS, episodes=EPISODES, noise_steps=NOISE_STEPS,
                           directions=N_Z, z_max=Z_MAX, leash=LEASH, reward_scale=REWARD_SCALE, warmup=WARMUP,
                           gamma=GAMMA, utd=UTD, batch=BATCH, lr=LR, tau=TAU))
-    if L["curve"]:
-        wb_log(L["curve"], **wb)  # a restart: the rounds so far (W&B drops any it already has)
+    wb = wb_open(L["curve"], **wb)
     catch_up(L, update, transitions, scale_inputs, dev)
     save(L)  # the workers need an actor (fresh: noise about N(0, 1), like the plain policy)
     for rnd in range(L["round"], ROUNDS):
@@ -462,8 +466,9 @@ def train():
         L["curve"].append(row)
         save(L)
         report(L["curve"])
-        wb_log([row], **wb)
+        wb.log(row, step=rnd)
         print(f"\n=== DSRL round {rnd}: {row}\n", flush=True)
+    wb.finish()
 
 
 _reset, _trial, _run_unit = ev.reset, cheat.trial, ev.run_unit
@@ -474,6 +479,8 @@ if TRAIN:
     ev.reset = reset
     ev.trial_seed = lambda plant, spot, t: SEED + 10_000 * ev.PLANTS.index(plant) + t
     cheat.RESULTS = ev.RESULTS = OUT / "eval" / EVAL if EVAL else OUT.parent
+if os.environ.get("DSRL") == "eval":  # the pour benchmark: its folder also names the run and the push
+    cheat.RESULTS = ev.RESULTS = ROOT / f"pour-dsrl{'-' + RUN if RUN else ''}{'-sampled' if SAMPLE else ''}{pour.tag()}"
 if REPLAY:  # those rounds' exact trials (same starts, seeds and so grasps), poured by ARM instead of the actor then
     ev.reset = reset
     ev.trial_seed = lambda plant, spot, t: SEED + 10_000 * ev.PLANTS.index(plant) + t
@@ -483,7 +490,8 @@ if STARTS:  # random starts drawn as in training, new seeds; nothing is trained 
     ev.reset = reset
     ev.trial_seed = lambda plant, spot, t: STARTS_SEED + 10_000 * ev.PLANTS.index(plant) + t
     ev.UNITS = [f"{p}-0-{t}" for t in range(STARTS_TRIALS) for p in ev.PLANTS]
-    cheat.RESULTS = ev.RESULTS = ROOT / f"starts-{cheat.ARM}{'-sampled' if SAMPLE and cheat.ARM == 'dsrl' else ''}"
+    arm = cheat.ARM + (f"-{RUN}" if RUN and cheat.ARM == "dsrl" else "") + ("-sampled" if SAMPLE and cheat.ARM == "dsrl" else "")
+    cheat.RESULTS = ev.RESULTS = ROOT / f"starts-{arm}{'' if pour.OLD_RULES else '-newrules'}"
 
 
 def full():
