@@ -1,9 +1,11 @@
 """Grasp bank: the plain policy grasps and lifts the mug, and the sim is saved at the replan where the pour benchmark
-hands over to the arm under test. Any later run can then pour from these exact states: no grasp phase, no wasted
-non-carried trial, and every arm pours from the identical state.
+hands over to the arm under test; then plain keeps pouring, which labels the grasp with plain's outcome from it.
+Any later run can then pour from these exact states: no grasp phase, no wasted non-carried trial, every arm pours
+from the identical state, and training can pick grasps by plain's label (e.g. more of those it failed).
 
-Per carried trial -> results/grasps-<bank>/<model>/<unit>.pkl (see save()), beside cheat's <unit>.json (the outcome;
-a unit with a json and no pkl was not carried). Each grasp is reloaded into the env right after, and a fixed chunk
+Per carried trial -> results/grasps-<bank>/<model>/<unit>.pkl (see save(); "plain": the label), beside pour's
+<unit>.json (the whole trial; a unit with a json and no pkl was not carried). The label is one sample: plain's pour
+is random (SmolVLA's noise). Each grasp is reloaded into the env right after, and a fixed chunk
 run from both the in-memory state and the reloaded file: reload_mm (gripper or any droplet, 0 = exact) in the pkl and
 on the unit's line.
 
@@ -16,6 +18,7 @@ Usage: ./run grasps [--jobs 22]                   bench bank, spots 5-8, seed se
        SEED=10000 ./run grasps [--jobs 22]        another seed set
        GRASPS=train ./run grasps [--jobs 22]      training bank
 """
+import json
 import os
 import pickle
 
@@ -101,7 +104,8 @@ def run(env, chunk):
 
 
 def act(model, frame, task):
-    """pour's act; at the hand-over replan (mug carried for the first time): save, check the in-memory rewind, end."""
+    """pour's act; at the hand-over replan (mug carried for the first time): save and check the in-memory rewind;
+    plain then pours on, with this same chunk first."""
     run_, env = cheat._run, cheat._run["env"]
     e = env.env
     if run_["lifted"] or "grasp" in _g or not cheat.carried(e):
@@ -112,16 +116,17 @@ def act(model, frame, task):
     g["chunk"], g["check_end"] = chunk, run(env, chunk)
     cheat.restore(e, snap)
     _g["grasp"] = g
-    ev.MAX_STEPS = e.timestep  # evaluate.trial's loop reads it every step: it stops after this one (pour.trial resets it)
     return chunk
 
 
 def run_unit(unit, name, *args, **kwargs):
-    """cheat's run_unit, then the grasp (if carried) -> <unit>.pkl, reloaded and checked first."""
+    """cheat's run_unit (plain's whole pour), then the grasp (if carried) with plain's outcome -> <unit>.pkl,
+    reloaded and checked first."""
     out = _run_unit(unit, name, *args, **kwargs)
     g = _g.get("grasp")
     if g is None:
         return out
+    r = json.loads((cheat.RESULTS / name / f"{unit}.json").read_text())["trials"][0]
     plant, spot, t = unit.split("-")
     env = ev.scene(plant)
     seed = ev.trial_seed(plant, int(spot), int(t))
@@ -129,12 +134,13 @@ def run_unit(unit, name, *args, **kwargs):
     load(env, g)
     end = run(env, g["chunk"])
     g.update(unit=unit, plant=plant, spot=int(spot), spot_cm=tuple(ev.SPOTS[int(spot)]), seed=seed, model=name,
-             reload_mm=round(float(np.abs(end - g["check_end"]).max() * 1000), 3))
+             reload_mm=round(float(np.abs(end - g["check_end"]).max() * 1000), 3),
+             plain={k: r[k] for k in ("watered", "in_target", "in_wrong", "spilled", "in_mug", "ended", "steps")})
     path = cheat.RESULTS / name / f"{unit}.pkl"
     tmp = path.with_suffix(".tmp")
     tmp.write_bytes(pickle.dumps(g))
     tmp.rename(path)  # a killed worker never leaves half a file
-    print(f"  {unit}: grasp saved at step {g['step']}, reload_mm {g['reload_mm']}", flush=True)
+    print(f"  {unit}: grasp saved at step {g['step']}, reload_mm {g['reload_mm']}, plain watered {r['watered']}", flush=True)
     return out
 
 

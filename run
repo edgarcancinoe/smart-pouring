@@ -56,7 +56,7 @@
 #   ./run rltoken-token            RL Token: the token encoder-decoder on SmolVLA's prefix (judge frames) -> token.pt + Hub
 #   ./run rltoken     [--jobs 18]  RL Token: online actor-critic refining SmolVLA's chunk, in rounds -> results/rltoken/
 #   ./run pour-rltoken [--jobs 30] the pour-only benchmark with the trained RL Token actor -> results/pour-rltoken/
-#   ./run grasps [--jobs 22]           plain grasps saved at the pour hand-over (GRASPS=train: random starts) -> results/grasps*/
+#   ./run grasps [--jobs 22]           plain grasps saved at the pour hand-over, labelled by plain's pour (GRASPS=train: random starts) -> results/grasps*/
 #   ./run distill     [--jobs 16]  control B: the cheat pours at spots 1-4, recorded -> dataset/data/cheat/
 #   ./run distill-export           the watered ones + dagger1's data -> Hub (then ./run train libero-4s-dart-full-xxl-sd-rel-b64-dagger1-cheat)
 #   ./run pour-distilled [--jobs 30]  the pour-only benchmark of that model -> results/pour-plain/<model>/
