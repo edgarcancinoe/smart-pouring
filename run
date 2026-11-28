@@ -56,6 +56,7 @@
 #   ./run rltoken-token            RL Token: the token encoder-decoder on SmolVLA's prefix (judge frames) -> token.pt + Hub
 #   ./run rltoken     [--jobs 18]  RL Token: online actor-critic refining SmolVLA's chunk, in rounds -> results/rltoken/
 #   ./run pour-rltoken [--jobs 30] the pour-only benchmark with the trained RL Token actor -> results/pour-rltoken/
+#   ./run grasps [--jobs 22]           plain grasps saved at the pour hand-over (GRASPS=train: random starts) -> results/grasps*/
 #   ./run distill     [--jobs 16]  control B: the cheat pours at spots 1-4, recorded -> dataset/data/cheat/
 #   ./run distill-export           the watered ones + dagger1's data -> Hub (then ./run train libero-4s-dart-full-xxl-sd-rel-b64-dagger1-cheat)
 #   ./run pour-distilled [--jobs 30]  the pour-only benchmark of that model -> results/pour-plain/<model>/
@@ -108,6 +109,7 @@ case "$cmd" in
   cheat-plain) OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 ARM=plain PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions MUJOCO_GL=$gl exec $py smolvla-worldmodel/cheat.py "$@" ;;
   pour)        OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 ARM=cheat PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions:smolvla-worldmodel MUJOCO_GL=$gl exec $py smolvla-worldmodel/pour.py "$@" ;;
   pour-plain)  OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 ARM=plain PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions:smolvla-worldmodel MUJOCO_GL=$gl exec $py smolvla-worldmodel/pour.py "$@" ;;
+  grasps)      OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 ARM=plain PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions:smolvla-worldmodel MUJOCO_GL=$gl exec $py smolvla-worldmodel/grasps.py "$@" ;;
   pour-distance) OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 ARM=distance PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions:smolvla-worldmodel MUJOCO_GL=$gl exec $py smolvla-worldmodel/pour.py "$@" ;;
   pour-judge)  OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 ARM=judge PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions:smolvla-worldmodel MUJOCO_GL=$gl exec $py smolvla-worldmodel/pour.py "$@" ;;
   recap)       OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 PYTHONPATH=.:smolvla-finetune:smolvla-memory/grasp-position:smolvla-memory/relative-actions:smolvla-worldmodel MUJOCO_GL=$gl exec $py smolvla-worldmodel/recap.py "$@" ;;
