@@ -24,6 +24,8 @@ Both go to W&B (eval_*, plain_*) beside the training pours, so the curve compare
 
 Usage: ./run dsrl [--jobs 9]        train -> results/dsrl/<model>/
        DSRL_RUN=clean ./run dsrl    a separate run: results/dsrl-clean/<model>/, the Hub's worldmodel/dsrl-clean/
+       DSRL_RUN=priv DSRL_PRIV=1 ./run dsrl   diagnostic: the actor also sees the sim state (set DSRL_PRIV=1 to evaluate it too)
+       DSRL_RUN=leash01 DSRL_LEASH=0.1 ./run dsrl   a weaker leash
        ./run pour-dsrl [--jobs 9]   the pour benchmark at spots 5-8 with the trained actor (its mean noise) -> results/pour-dsrl/
        SAMPLE=1 ./run pour-dsrl ...  the same with sampled pushes (as in training), not the actor's mean
        ./run starts-plain | starts-dsrl [--jobs 18]  training-style random mug starts with new seeds, nothing trained:
@@ -81,7 +83,8 @@ ROUNDS = int(os.environ.get("DSRL_ROUNDS", 30))  # a finished run continues to m
 EPISODES = 18           # pour trials per round (a third per plant)
 NOISE_STEPS = 10        # chunk steps the directions span (= the N_ACTION_STEPS run)
 Z_MAX = 2.0             # the actor's push along each direction is squashed to +- this (plain noise: N(0, 1) along each)
-LEASH = 1.0             # actor loss + LEASH x |z|^2: stay near the noise SmolVLA was trained on (a drop is worth REWARD_SCALE)
+LEASH = float(os.environ.get("DSRL_LEASH", 1.0))  # actor loss + LEASH x |z|^2: stay near SmolVLA's noise (a drop is worth REWARD_SCALE)
+PRIV = os.environ.get("DSRL_PRIV") == "1"  # diagnostic: the actor also sees the sim state the critic sees (priv()); not deployable
 HIDDEN = 256
 GAMMA = 0.95            # per replan (0.5 s): about 10 s ahead
 UTD = 2                 # gradient steps per new transition (10 let the critic diverge: Q ~400 vs returns ~14)
@@ -94,6 +97,7 @@ SEED = 40_000           # training trial seeds: no eval, judge or distill seed
 WANDB_PROJECT = "smart-pouring"  # live curves at wandb.ai/<you>/smart-pouring, as smolvla-finetune/train.py
 AREA = ((-24.0, 14.0), (27.0, 30.0))  # cm: random mug starts, as judge_full.py (importing it would patch evaluate)
 KEEP_OUT = 4.0          # cm from spots 5-8
+CKPT = os.environ.get("DSRL_CKPT", "")  # evaluations: the actor saved after this round (default: the run's latest)
 RUN = os.environ.get("DSRL_RUN", "")  # a run's name: its own folders here and on the Hub ("" = the first run's)
 EVAL = os.environ.get("DSRL_EVAL", "")  # set by train() for its held-out check: "plain" or the round
 EVAL_FROM, EVAL_EVERY = 15, 5  # held-out check from this round, then every EVAL_EVERY rounds and after the last
@@ -105,6 +109,7 @@ N_A = len(ev.OPEN)      # action dims (7)
 N_W = NOISE_STEPS * N_A  # noise numbers of the steps run
 N_OBS = 8 + 3 + len(ev.PLANTS)  # state, grasp memory, plant
 N_PRIV = 9              # priv()
+N_IN = N_OBS + (N_PRIV if PRIV else 0)  # the actor's input
 
 def directions():
     """The noise patterns the actor steers, (N_W, N_Z) orthonormal columns over the (NOISE_STEPS, 7) noise grid: per
@@ -142,6 +147,11 @@ def priv(s):
     return np.r_[s["mouth_cm"], s["tilt"], s["in_mug"], s["over"], s["elsewhere"], s["hand_cm"], s["up_cm"]].astype(np.float32)
 
 
+def seen(o, p):
+    """What the actor sees: the policy's inputs, plus the sim state with DSRL_PRIV=1."""
+    return torch.cat([o, p], -1) if PRIV else o
+
+
 def mlp(n_in, n_out):
     return nn.Sequential(nn.Linear(n_in, HIDDEN), nn.LayerNorm(HIDDEN), nn.ReLU(),
                          nn.Linear(HIDDEN, HIDDEN), nn.LayerNorm(HIDDEN), nn.ReLU(), nn.Linear(HIDDEN, n_out))
@@ -152,9 +162,9 @@ class Actor(nn.Module):
 
     def __init__(self):
         super().__init__()
-        self.register_buffer("mean", torch.zeros(N_OBS))
-        self.register_buffer("std", torch.ones(N_OBS))
-        self.net = mlp(N_OBS, 2 * N_Z)
+        self.register_buffer("mean", torch.zeros(N_IN))
+        self.register_buffer("std", torch.ones(N_IN))
+        self.net = mlp(N_IN, 2 * N_Z)
         nn.init.zeros_(self.net[-1].weight), nn.init.zeros_(self.net[-1].bias)  # fresh: z ~ tanh(N(0, 1)) x Z_MAX for every state, about the plain policy
 
     def forward(self, o, explore=True):
@@ -182,12 +192,32 @@ class Critic(nn.Module):
         return self.q1(x)[:, 0], self.q2(x)[:, 0]
 
 
+def checkpoint(n):
+    """The actor this run (RUN) saved after round n, from the Hub's history -> a local path: the "DSRL round n" commit
+    whose dsrl.json (this run's) ends at round n."""
+    from huggingface_hub import HfApi, hf_hub_download
+    for c in HfApi().list_repo_commits(HUB, repo_type="dataset"):  # newest first: a round's last upload part
+        if c.title.split(" (")[0] != f"DSRL round {n}":
+            continue
+        try:
+            curve = json.load(open(hf_hub_download(HUB, f"{HUB_DIR}/dsrl.json", repo_type="dataset", revision=c.commit_id)))
+        except Exception:  # another run's round n: this run's folder isn't in that commit
+            continue
+        if curve and curve[-1]["round"] == n:
+            return hf_hub_download(HUB, f"{HUB_DIR}/actor.pt", repo_type="dataset", revision=c.commit_id)
+    raise SystemExit(f"no actor saved after round {n} in the Hub's {HUB_DIR}")
+
+
 def actor():
-    """This process's actor, reloaded when actor.pt changes (training: after every round). Eval: from the Hub if not here."""
-    path = ACTOR
-    if not path.exists():
+    """This process's actor, reloaded when actor.pt changes (training: after every round). Eval: CKPT's (DSRL_CKPT=<round>)
+    or this run's latest, from the Hub if not here."""
+    if CKPT:
+        path = _w.get("ckpt_path") or _w.setdefault("ckpt_path", checkpoint(int(CKPT)))
+    else:
+        path = ACTOR
+    if not os.path.exists(path):
         from huggingface_hub import hf_hub_download
-        path = hf_hub_download(HUB, f"worldmodel/dsrl/{cheat.MODEL}/actor.pt", repo_type="dataset")
+        path = hf_hub_download(HUB, f"{HUB_DIR}/actor.pt", repo_type="dataset")
     mtime = os.path.getmtime(path)
     if _w.get("mtime") != mtime:
         a = Actor()
@@ -201,7 +231,7 @@ def pick(model, frame, task, s):
     directions (w = B z + the noise's part off the directions); the replan and its noise w are recorded."""
     o = obs(frame, task)
     with torch.no_grad():
-        z = actor()(torch.from_numpy(o)[None], explore=(TRAIN and not EVAL) or SAMPLE)[0][0]
+        z = actor()(torch.from_numpy(np.r_[o, priv(s)] if PRIV else o)[None], explore=(TRAIN and not EVAL) or SAMPLE)[0][0]
     policy, pre, post = model
     cfg = policy.config
     noise = torch.randn(1, cfg.chunk_size, cfg.max_action_dim)  # plain policy's noise everywhere...
@@ -288,7 +318,7 @@ def update(L, data, steps, dev, actor=True):
         i = torch.randint(n, (BATCH,), device=dev)
         alpha = log_alpha.exp().item()
         with torch.no_grad():
-            z2, logp2 = a(d["o2"][i])
+            z2, logp2 = a(seen(d["o2"][i], d["p2"][i]))
             y = REWARD_SCALE * d["r"][i] + GAMMA * (1 - d["d"][i]) * (torch.min(*t(d["o2"][i], d["p2"][i], z2)) - alpha * logp2)
         q1, q2 = c(d["o"][i], d["p"][i], d["z"][i])
         loss_c = F.mse_loss(q1, y) + F.mse_loss(q2, y)
@@ -300,7 +330,7 @@ def update(L, data, steps, dev, actor=True):
                 pt.lerp_(pc, TAU)
         if not actor:
             continue
-        z, logp = a(d["o"][i])
+        z, logp = a(seen(d["o"][i], d["p"][i]))
         q = torch.min(*c(d["o"][i], d["p"][i], z))
         loss_a = (alpha * logp - q + LEASH * (z ** 2).sum(-1)).mean()
         L["opt_a"].zero_grad()
@@ -311,7 +341,7 @@ def update(L, data, steps, dev, actor=True):
         loss_alpha.backward()
         L["opt_alpha"].step()
     with torch.no_grad():
-        z, _ = a(d["o"][i])
+        z, _ = a(seen(d["o"][i], d["p"][i]))
         q = torch.min(*c(d["o"][i], d["p"][i], z))
     out = dict(critic_loss=loss_c.item(), q=q.mean().item(), alpha=log_alpha.exp().item(), push=z.abs().mean().item())
     if actor:
@@ -367,7 +397,8 @@ def report(curve):
 
 def scale_inputs(L, data):
     """Fix the networks' input scaling from data's states (once per learner)."""
-    L["actor"].mean.copy_(data["o"].mean(0)), L["actor"].std.copy_(data["o"].std(0).clamp(min=1e-2))
+    x = seen(data["o"], data["p"])
+    L["actor"].mean.copy_(x.mean(0)), L["actor"].std.copy_(x.std(0).clamp(min=1e-2))
     x = torch.cat([data["o"], data["p"]], -1)
     for c in (L["critic"], L["target"]):
         c.mean.copy_(x.mean(0)), c.std.copy_(x.std(0).clamp(min=1e-2))
@@ -430,7 +461,7 @@ def train():
     L["wandb_id"] = L.get("wandb_id") or f"dsrl-{int(time.time())}"  # kept in learner.pt: a resumed run continues the same W&B run
     wb = dict(name=f"dsrl-{RUN or 'dirs' + str(N_Z)}-{cheat.MODEL}", id=L["wandb_id"],
               config=dict(model=cheat.MODEL, rounds=ROUNDS, episodes=EPISODES, noise_steps=NOISE_STEPS,
-                          directions=N_Z, z_max=Z_MAX, leash=LEASH, reward_scale=REWARD_SCALE, warmup=WARMUP,
+                          directions=N_Z, z_max=Z_MAX, leash=LEASH, privileged_actor=PRIV, reward_scale=REWARD_SCALE, warmup=WARMUP,
                           gamma=GAMMA, utd=UTD, batch=BATCH, lr=LR, tau=TAU))
     wb = wb_open(L["curve"], **wb)
     catch_up(L, update, transitions, scale_inputs, dev)
@@ -480,7 +511,7 @@ if TRAIN:
     ev.trial_seed = lambda plant, spot, t: SEED + 10_000 * ev.PLANTS.index(plant) + t
     cheat.RESULTS = ev.RESULTS = OUT / "eval" / EVAL if EVAL else OUT.parent
 if os.environ.get("DSRL") == "eval":  # the pour benchmark: its folder also names the run and the push
-    cheat.RESULTS = ev.RESULTS = ROOT / f"pour-dsrl{'-' + RUN if RUN else ''}{'-sampled' if SAMPLE else ''}{pour.tag()}"
+    cheat.RESULTS = ev.RESULTS = ROOT / f"pour-dsrl{'-' + RUN if RUN else ''}{'-ckpt' + CKPT if CKPT else ''}{'-sampled' if SAMPLE else ''}{pour.tag()}"
 if REPLAY:  # those rounds' exact trials (same starts, seeds and so grasps), poured by ARM instead of the actor then
     ev.reset = reset
     ev.trial_seed = lambda plant, spot, t: SEED + 10_000 * ev.PLANTS.index(plant) + t
@@ -490,7 +521,8 @@ if STARTS:  # random starts drawn as in training, new seeds; nothing is trained 
     ev.reset = reset
     ev.trial_seed = lambda plant, spot, t: STARTS_SEED + 10_000 * ev.PLANTS.index(plant) + t
     ev.UNITS = [f"{p}-0-{t}" for t in range(STARTS_TRIALS) for p in ev.PLANTS]
-    arm = cheat.ARM + (f"-{RUN}" if RUN and cheat.ARM == "dsrl" else "") + ("-sampled" if SAMPLE and cheat.ARM == "dsrl" else "")
+    mine = cheat.ARM == "dsrl"
+    arm = cheat.ARM + (f"-{RUN}" if RUN and mine else "") + (f"-ckpt{CKPT}" if CKPT and mine else "") + ("-sampled" if SAMPLE and mine else "")
     cheat.RESULTS = ev.RESULTS = ROOT / f"starts-{arm}{'' if pour.OLD_RULES else '-newrules'}"
 
 
