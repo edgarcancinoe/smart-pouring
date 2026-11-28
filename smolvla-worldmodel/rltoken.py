@@ -430,7 +430,7 @@ dsrl.OUT, dsrl.HUB_DIR = OUT, HUB_DIR  # its trial() saves the replans to OUT/da
 if TRAIN:
     cheat.RESULTS = ev.RESULTS = OUT.parent
 elif os.environ.get("RLT") == "eval":  # the pour benchmark (DSRL=eval): its folder names the run, like pour-dsrl's
-    cheat.RESULTS = ev.RESULTS = OUT.parent / f"pour-rltoken{'-' + RUN if RUN else ''}{dsrl.pour.tag()}"
+    cheat.RESULTS = ev.RESULTS = dsrl.ROOT / f"pour-rltoken{'-' + RUN if RUN else ''}{dsrl.pour.tag()}"
 
 if __name__ == "__main__":
     if os.environ.get("RLT") == "token":
